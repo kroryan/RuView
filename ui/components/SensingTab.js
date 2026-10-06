@@ -31,7 +31,10 @@ export class SensingTab {
     this._connectService();
     this._setupCalibration();
     await this._loadRooms();
-    this._refreshCalibrationStatus();
+    await this._refreshCalibrationStatus();
+    if (this._calibrationIdentity) {
+      this._startCalibrationPolling();
+    }
     this._setupResize();
   }
 
@@ -548,7 +551,7 @@ export class SensingTab {
 
   async _refreshCalibrationStatus() {
     try {
-      const status = await apiService.get('/api/v1/calibration/status');
+      const status = await apiService.get('/api/v1/calibration/status', { t: Date.now() });
       if (status?.session_id && status?.binding_digest && status?.source_node_ids?.length) {
         this._calibrationIdentity = {
           boot_epoch: status.boot_epoch,

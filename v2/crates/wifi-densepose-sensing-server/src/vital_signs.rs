@@ -14,6 +14,8 @@ use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
+pub mod spectral;
+
 // ── Configuration constants ────────────────────────────────────────────────
 
 /// Breathing rate physiological band: 6-30 breaths per minute.
@@ -64,6 +66,14 @@ impl Default for VitalSigns {
 
 /// Stateful vital sign detector. Maintains rolling buffers of CSI amplitude
 /// data and extracts breathing and heart rate via spectral analysis.
+///
+/// Rates are produced by a multi-subcarrier estimator (see
+/// [`spectral`]): the timestamped per-subcarrier window is resampled onto a
+/// uniform grid, the most periodic subcarriers are selected and their
+/// normalised power spectra are combined, and a rate is only reported when the
+/// combined peak is statistically separated from the in-band noise floor.
+/// The legacy mean-amplitude / phase-variance buffers are kept for
+/// diagnostics and backwards-compatible `buffer_status()` semantics.
 #[allow(dead_code)]
 pub struct VitalSignDetector {
     /// Rolling buffer of mean-amplitude samples for breathing detection.
@@ -82,6 +92,17 @@ pub struct VitalSignDetector {
     heartbeat_capacity: usize,
     /// Running frame count for signal quality estimation.
     frame_count: u64,
+    /// Timestamped per-subcarrier history used by the spectral estimator.
+    window: spectral::SubcarrierWindow,
+    /// Most recent spectral estimate; refreshed every
+    /// `spectral::ESTIMATE_INTERVAL_SECS` of signal time.
+    cached: spectral::Estimate,
+    /// Signal time (seconds) of the last spectral refresh.
+    last_estimate_at: f64,
+    /// Seconds between refreshes (tests may widen this to force a single run).
+    estimate_interval_secs: f64,
+    /// Reusable FFT plan keyed by length.
+    fft_plan: Option<spectral::FftPlan>,
 }
 
 impl VitalSignDetector {
@@ -106,27 +127,40 @@ impl VitalSignDetector {
             breathing_capacity: breathing_capacity.max(1),
             heartbeat_capacity: heartbeat_capacity.max(1),
             frame_count: 0,
+            window: spectral::SubcarrierWindow::default(),
+            cached: spectral::Estimate::default(),
+            last_estimate_at: f64::NEG_INFINITY,
+            estimate_interval_secs: spectral::ESTIMATE_INTERVAL_SECS,
+            fft_plan: None,
         }
     }
 
-    /// Process one CSI frame and return updated vital signs.
+    /// Process one CSI frame using a synthetic uniform clock derived from the
+    /// configured sample rate. Prefer [`Self::process_frame_at`] with the real
+    /// arrival time whenever one is available.
+    pub fn process_frame(&mut self, amplitude: &[f64], phase: &[f64]) -> VitalSigns {
+        let t = self.frame_count as f64 / self.sample_rate.max(1.0);
+        self.process_frame_at(amplitude, phase, t)
+    }
+
+    /// Process one CSI frame observed at `t_secs` (monotonic seconds) and
+    /// return updated vital signs.
     ///
     /// `amplitude` - per-subcarrier amplitude values for this frame.
-    /// `phase` - per-subcarrier phase values for this frame.
+    /// `phase` - per-subcarrier (wrapped) phase values for this frame.
     ///
-    /// The detector extracts two aggregate features per frame:
-    /// 1. Mean amplitude (breathing signal -- chest movement modulates path loss)
-    /// 2. Phase variance across subcarriers (heartbeat signal -- subtle phase shifts)
-    pub fn process_frame(&mut self, amplitude: &[f64], phase: &[f64]) -> VitalSigns {
+    /// The frame is appended to a timestamped per-subcarrier window. Rates come
+    /// from the multi-subcarrier spectral estimator in [`spectral`], refreshed
+    /// every half second of signal time; between refreshes the cached estimate
+    /// is returned. A frame whose timestamp does not advance is ignored.
+    pub fn process_frame_at(&mut self, amplitude: &[f64], phase: &[f64], t_secs: f64) -> VitalSigns {
         self.frame_count += 1;
 
         if amplitude.is_empty() {
             return VitalSigns::default();
         }
 
-        // -- Feature 1: Mean amplitude for breathing detection --
-        // Respiratory chest displacement (1-5 mm) modulates CSI amplitudes
-        // across all subcarriers. Mean amplitude captures this well.
+        // -- Legacy aggregate features (diagnostics / buffer_status) --
         let n = amplitude.len() as f64;
         let mean_amp: f64 = amplitude.iter().sum::<f64>() / n;
 
@@ -135,11 +169,6 @@ impl VitalSignDetector {
             self.breathing_buffer.pop_front();
         }
 
-        // -- Feature 2: Phase variance for heartbeat detection --
-        // Cardiac-induced body surface displacement is < 0.5 mm, producing
-        // tiny phase changes. Cross-subcarrier phase variance captures this
-        // more sensitively than amplitude alone.
-        //
         // Phases come from atan2() and are wrapped to (-pi, pi]. Linear mean
         // and variance on wrapped values is wrong: two phases close across
         // the +/-pi discontinuity (e.g. pi-eps and -pi+eps) are physically
@@ -169,18 +198,59 @@ impl VitalSignDetector {
             self.heartbeat_buffer.pop_front();
         }
 
-        // -- Extract vital signs --
-        let (breathing_rate, breathing_confidence) = self.extract_breathing();
-        let (heart_rate, heartbeat_confidence) = self.extract_heartbeat();
+        // -- Spectral estimation over the timestamped per-subcarrier window --
+        let generation = self.window.generation();
+        if self.window.push(t_secs, amplitude, phase) {
+            if self.window.generation() != generation {
+                // A gap or grid change discarded the history the cached
+                // estimate was computed from.
+                self.cached = spectral::Estimate::default();
+                self.last_estimate_at = f64::NEG_INFINITY;
+            }
+            if t_secs - self.last_estimate_at >= self.estimate_interval_secs {
+                self.refresh_estimate(t_secs);
+            }
+        }
 
-        // -- Signal quality --
-        let signal_quality = self.compute_signal_quality(amplitude);
+        self.assemble(amplitude)
+    }
 
+    fn refresh_estimate(&mut self, t_secs: f64) {
+        self.cached = spectral::estimate(&self.window, &mut self.fft_plan);
+        self.last_estimate_at = t_secs;
+    }
+
+    /// Recompute the spectral estimate immediately (tests / diagnostics).
+    #[allow(dead_code)]
+    pub(crate) fn force_estimate(&mut self) {
+        let t = self.window.span_secs();
+        self.refresh_estimate(t);
+    }
+
+    /// Latest spectral estimate with per-band SNR/agreement diagnostics.
+    #[allow(dead_code)]
+    pub fn last_estimate(&self) -> &spectral::Estimate {
+        &self.cached
+    }
+
+    /// Combine the cached estimate with the amplitude-statistics quality term.
+    fn assemble(&self, amplitude: &[f64]) -> VitalSigns {
+        let est = &self.cached;
+        let health = self.compute_signal_quality(amplitude);
+        let evidence = est
+            .breathing
+            .confidence
+            .max(0.5 * est.heartbeat.confidence);
+        let fill = (self.window.span_secs() / spectral::WINDOW_SECS).clamp(0.0, 1.0);
+        // Quality needs periodic evidence, not just a lively amplitude. A
+        // lively but aperiodic channel (noise, a neighbour's traffic) scores low.
+        let signal_quality =
+            (fill.sqrt() * (0.35 * health + 0.65 * evidence)).clamp(0.0, 1.0);
         VitalSigns {
-            breathing_rate_bpm: breathing_rate,
-            heart_rate_bpm: heart_rate,
-            breathing_confidence,
-            heartbeat_confidence,
+            breathing_rate_bpm: est.breathing.rate_bpm(),
+            heart_rate_bpm: est.heartbeat.rate_bpm(),
+            breathing_confidence: est.breathing.confidence,
+            heartbeat_confidence: est.heartbeat.confidence,
             signal_quality,
         }
     }
@@ -344,6 +414,9 @@ impl VitalSignDetector {
         self.breathing_buffer.clear();
         self.heartbeat_buffer.clear();
         self.frame_count = 0;
+        self.window.clear();
+        self.cached = spectral::Estimate::default();
+        self.last_estimate_at = f64::NEG_INFINITY;
     }
 
     /// Retune temporal windows to an observed CSI clock. Changes smaller than

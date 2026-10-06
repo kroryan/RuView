@@ -2592,14 +2592,29 @@ impl AppStateInner {
                 return false;
             }
             CalibrationSequenceOrder::Discontinuity => {
-                self.calibration_sequence_fault_node_ids.insert(node_id);
-                warn!(
-                    node_id,
-                    previous_sequence,
-                    sequence,
-                    "Calibration source sequence discontinuity exceeded reorder window; restart the empty-room capture"
-                );
-                return false;
+                let status = self.field_model.as_ref().map(|f| f.status());
+                if matches!(status, Some(CalibrationStatus::Uncalibrated | CalibrationStatus::Collecting)) {
+                    self.calibration_sequence_fault_node_ids.insert(node_id);
+                    warn!(
+                        node_id,
+                        previous_sequence,
+                        sequence,
+                        "Calibration source sequence discontinuity exceeded reorder window; restart the empty-room capture"
+                    );
+                    return false;
+                } else {
+                    self.calibration_last_sequences.insert(node_id, sequence);
+                    if let Some(node) = self.node_states.get_mut(&node_id) {
+                        node.clear_field_model_history();
+                    }
+                    warn!(
+                        node_id,
+                        previous_sequence,
+                        sequence,
+                        "Runtime sequence discontinuity; cleared field model history for recovery"
+                    );
+                    // It will continue and push the new frame.
+                }
             }
             CalibrationSequenceOrder::First | CalibrationSequenceOrder::Forward => {}
         }

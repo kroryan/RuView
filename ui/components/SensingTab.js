@@ -128,8 +128,8 @@ export class SensingTab {
           </div>
 
           <!-- Real empty-room field calibration -->
-          <div class="sensing-card" id="sensingCalibrationCard">
-            <div class="sensing-card-title">ROOM CALIBRATION</div>
+          <div class="sensing-card sensing-calibration-card" id="sensingCalibrationCard">
+            <div class="sensing-card-title">ROOM CALIBRATION — LIVE PROGRESS</div>
             <p class="sensing-about-text">
               Keep the monitored room empty. One capture session can bind
               several live ESP32 nodes together; every selected node must
@@ -144,12 +144,20 @@ export class SensingTab {
               <button id="calibrationReset" class="sensing-calibration-button sensing-calibration-danger">Reset</button>
             </div>
             <div class="sensing-calibration-progress" aria-live="polite">
+              <div class="sensing-calibration-progress-heading">
+                <strong id="calibrationProgressPercent">0%</strong>
+                <span>GLOBAL COMPLETION</span>
+              </div>
               <div class="sensing-calibration-progress-track">
                 <div id="calibrationProgress" class="sensing-calibration-progress-fill" style="width:0%"></div>
               </div>
-              <div id="calibrationProgressText" class="sensing-calibration-progress-text">
-                0% — 00:00 — nodes 0/0
+              <div class="sensing-calibration-stats">
+                <div><span>ELAPSED</span><strong id="calibrationElapsed">00:00</strong></div>
+                <div><span>TARGET</span><strong id="calibrationTarget">--:--</strong></div>
+                <div><span>NODES</span><strong id="calibrationNodeProgress">0 / 0</strong></div>
+                <div><span>FRAMES</span><strong id="calibrationFrameProgress">0 / 0</strong></div>
               </div>
+              <div id="calibrationProgressText" class="sensing-calibration-progress-text">No active calibration.</div>
             </div>
             <div id="calibrationStatus" class="sensing-calibration-status" role="status" aria-live="polite">
               Waiting for ESP32 frames.
@@ -359,12 +367,29 @@ export class SensingTab {
     // Global completion is gated by every selected node plus both server gates.
     const progress = nodeTotal > 0 ? Math.round(Math.min(frameProgress, durationProgress, nodeProgress) * 100) : 0;
     const bar = this.container.querySelector('#calibrationProgress');
+    const percent = this.container.querySelector('#calibrationProgressPercent');
+    const elapsedEl = this.container.querySelector('#calibrationElapsed');
+    const targetEl = this.container.querySelector('#calibrationTarget');
+    const nodeEl = this.container.querySelector('#calibrationNodeProgress');
+    const frameEl = this.container.querySelector('#calibrationFrameProgress');
     const text = this.container.querySelector('#calibrationProgressText');
     if (bar) bar.style.width = `${progress}%`;
+    if (percent) percent.textContent = `${progress}%`;
+    if (elapsedEl) elapsedEl.textContent = this._formatCalibrationTime(status?.elapsed_s);
+    if (targetEl) targetEl.textContent = durationTarget > 0 ? this._formatCalibrationTime(durationTarget) : '--:--';
+    if (nodeEl) nodeEl.textContent = `${nodeDone} / ${nodeTotal}`;
+    if (frameEl) frameEl.textContent = `${Number(status?.frame_count || 0).toLocaleString()} / ${frameTarget ? frameTarget.toLocaleString() : '--'}`;
     if (text) {
       const elapsed = this._formatCalibrationTime(status?.elapsed_s);
       const target = durationTarget ? ` / ${this._formatCalibrationTime(durationTarget)}` : '';
-      text.textContent = `${progress}% — ${elapsed}${target} — nodes ${nodeDone}/${nodeTotal}`;
+      const missing = selected.filter((id) => !observed.has(id));
+      if (nodeTotal === 0) {
+        text.textContent = 'No active calibration. Select the live node IDs and start an empty-room capture.';
+      } else if (missing.length) {
+        text.textContent = `Waiting for nodes: ${missing.join(', ')} — ${elapsed}${target}`;
+      } else {
+        text.textContent = `All selected nodes are contributing — ${elapsed}${target}`;
+      }
     }
   }
 

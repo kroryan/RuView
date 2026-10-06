@@ -1866,6 +1866,17 @@ canvas {
   min-width: 0;
 }
 
+.sensing-calibration-card {
+  order: -1;
+  border: 2px solid var(--color-primary, #32b8c6);
+  box-shadow: 0 0 18px rgba(50, 184, 198, 0.16);
+}
+
+.sensing-calibration-card .sensing-card-title {
+  color: var(--color-primary, #32b8c6);
+  font-size: var(--font-size-sm);
+}
+
 .sensing-card-title {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
@@ -2022,11 +2033,30 @@ canvas {
 }
 
 .sensing-calibration-progress {
-  margin-top: 10px;
+  margin-top: 14px;
+}
+
+.sensing-calibration-progress-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--color-text-secondary, #9aa8b5);
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.sensing-calibration-progress-heading strong {
+  color: var(--color-primary, #32b8c6);
+  font-size: 30px;
+  letter-spacing: 0;
+  line-height: 1;
 }
 
 .sensing-calibration-progress-track {
-  height: 8px;
+  height: 18px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--color-surface, #111820);
@@ -2036,8 +2066,37 @@ canvas {
 .sensing-calibration-progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: var(--color-primary, #32b8c6);
+  background: linear-gradient(90deg, #168da0, var(--color-primary, #32b8c6));
   transition: width 0.35s ease;
+}
+
+.sensing-calibration-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.sensing-calibration-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sensing-calibration-stats span {
+  color: var(--color-text-secondary, #9aa8b5);
+  font-family: var(--font-family-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.sensing-calibration-stats strong {
+  color: var(--color-text, #e8eef5);
+  font-family: var(--font-family-mono);
+  font-size: 16px;
 }
 
 .sensing-calibration-progress-text {

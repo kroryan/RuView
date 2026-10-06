@@ -2021,6 +2021,32 @@ canvas {
   line-height: 1.4;
 }
 
+.sensing-calibration-progress {
+  margin-top: 10px;
+}
+
+.sensing-calibration-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-surface, #111820);
+  border: 1px solid var(--color-border, #34404c);
+}
+
+.sensing-calibration-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary, #32b8c6);
+  transition: width 0.35s ease;
+}
+
+.sensing-calibration-progress-text {
+  margin-top: 5px;
+  color: var(--color-text-secondary, #9aa8b5);
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+}
+
 .sensing-calibration-error {
   color: var(--color-error, #ef4444);
 }

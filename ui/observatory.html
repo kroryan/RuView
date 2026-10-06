@@ -21,25 +21,13 @@
     <!-- Top-right: Connection + status + gear -->
     <div id="status-bar">
       <div id="data-source-badge">
-        <span class="dot dot--demo"></span>
-        <span id="data-source-label">DEMO</span>
+        <span class="dot dot--offline"></span>
+        <span id="data-source-label">NO HARDWARE DATA</span>
       </div>
       <div id="scenario-area">
         <span id="autoplay-icon" title="Auto-cycling">&#9654;</span>
         <select id="scenario-quick-select" title="Change scenario">
-          <option value="auto">Auto-Cycle</option>
-          <option value="empty_room">Empty Room</option>
-          <option value="single_breathing">Vital Signs</option>
-          <option value="two_walking">Multi-Person</option>
-          <option value="fall_event">Fall Detect</option>
-          <option value="sleep_monitoring">Sleep Monitor</option>
-          <option value="intrusion_detect">Intrusion</option>
-          <option value="gesture_control">Gesture Ctrl</option>
-          <option value="crowd_occupancy">Crowd (4 ppl)</option>
-          <option value="search_rescue">Search Rescue</option>
-          <option value="elderly_care">Elderly Care</option>
-          <option value="fitness_tracking">Fitness</option>
-          <option value="security_patrol">Security Patrol</option>
+          <option value="live">Live Hardware</option>
         </select>
       </div>
       <div id="scenario-description"></div>
@@ -120,7 +108,7 @@
     <!-- Bottom-right: keyboard hints -->
     <div id="key-hints">
       <span class="key-hint">[A] Orbit</span>
-      <span class="key-hint">[D] Scenario</span>
+          <span class="key-hint">[D] Scenario (hardware)</span>
       <span class="key-hint">[F] FPS</span>
       <span class="key-hint">[S] Settings</span>
       <span class="key-hint">[Space] Pause</span>
@@ -265,29 +253,7 @@
         <label class="setting-row">
           <span>Scenario</span>
           <select id="opt-scenario">
-            <option value="auto">Auto-Cycle (30s)</option>
-            <optgroup label="Core Sensing">
-              <option value="empty_room">Empty Room</option>
-              <option value="single_breathing">Vital Signs (Breathing)</option>
-              <option value="two_walking">Multi-Person Tracking</option>
-              <option value="fall_event">Fall Detection</option>
-            </optgroup>
-            <optgroup label="Medical / Health">
-              <option value="sleep_monitoring">Sleep Monitoring (Apnea)</option>
-              <option value="elderly_care">Elderly Care (Gait)</option>
-              <option value="fitness_tracking">Fitness Tracking</option>
-            </optgroup>
-            <optgroup label="Security">
-              <option value="intrusion_detect">Intrusion Detection</option>
-              <option value="security_patrol">Security Patrol</option>
-            </optgroup>
-            <optgroup label="Building / Retail">
-              <option value="crowd_occupancy">Crowd Occupancy (4 ppl)</option>
-              <option value="gesture_control">Gesture Control (DTW)</option>
-            </optgroup>
-            <optgroup label="Disaster / Tactical">
-              <option value="search_rescue">Search &amp; Rescue (WiFi-Mat)</option>
-            </optgroup>
+            <option value="live">Live Hardware</option>
           </select>
         </label>
         <label class="setting-row">
@@ -310,8 +276,7 @@
         <label class="setting-row">
           <span>Data Source</span>
           <select id="opt-data-source">
-            <option value="demo" selected>Demo Generator</option>
-            <option value="ws">Live WebSocket</option>
+            <option value="ws" selected>Live ESP32 WebSocket</option>
           </select>
         </label>
         <label class="setting-row" id="ws-url-row" style="display:none">

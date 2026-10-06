@@ -25,7 +25,7 @@ export const DEFAULTS = {
   wireColor: '#00d878', jointColor: '#ff4060', aura: 0.02,
   field: 0.45, waves: 0.4, ambient: 0.7, reflect: 0.2,
   fov: 50, orbitSpeed: 0.15, grid: true, room: true,
-  scenario: 'auto', cycle: 30, dataSource: 'demo', wsUrl: '',
+  scenario: 'live', cycle: 30, dataSource: 'ws', wsUrl: '',
 };
 
 export const SETTINGS_VERSION = '6';
@@ -66,7 +66,7 @@ export const PRESETS = {
 
 // Scenario descriptions shown below the dropdown
 const SCENARIO_DESCRIPTIONS = {
-  auto:              'Auto-cycling through all sensing scenarios.',
+  live:              'Live ESP32 CSI data. No hardware data is displayed as zero/synthetic.',
   empty_room:        'Baseline calibration with no human presence in the monitored zone.',
   single_breathing:  'Detecting vital signs through WiFi signal micro-variations.',
   two_walking:       'Tracking multiple people simultaneously via CSI multiplex separation.',
@@ -83,7 +83,7 @@ const SCENARIO_DESCRIPTIONS = {
 
 // Edge modules active per scenario
 const SCENARIO_EDGE_MODULES = {
-  auto:              [],
+  live:              [],
   empty_room:        [],
   single_breathing:  ['VITALS'],
   two_walking:       ['GAIT', 'TRACKING'],
@@ -206,7 +206,7 @@ export class HudController {
       obs._camera.updateProjectionMatrix();
     });
     this._bindRange('opt-orbit-speed', 'orbitSpeed');
-    this._bindRange('opt-cycle', 'cycle', v => { obs._demoData.setCycleDuration(v); });
+    this._bindRange('opt-cycle', 'cycle');
 
     // Color pickers
     document.getElementById('opt-wire-color').value = s.wireColor;
@@ -233,7 +233,6 @@ export class HudController {
     scenarioSel.value = s.scenario;
     scenarioSel.addEventListener('change', (e) => {
       s.scenario = e.target.value;
-      obs._demoData.setScenario(e.target.value);
       this.saveSettings();
     });
 
@@ -293,7 +292,6 @@ export class HudController {
     const sel = document.getElementById('scenario-quick-select');
     if (!sel) return;
     sel.addEventListener('change', (e) => {
-      this._obs._demoData.setScenario(e.target.value);
       const settingsSel = document.getElementById('opt-scenario');
       if (settingsSel) settingsSel.value = e.target.value;
       this._obs.settings.scenario = e.target.value;
@@ -351,7 +349,6 @@ export class HudController {
     obs._floorMat.metalness = obs.settings.reflect * 0.5;
     obs._camera.fov = obs.settings.fov;
     obs._camera.updateProjectionMatrix();
-    obs._demoData.setCycleDuration(obs.settings.cycle);
     obs._applyColors();
   }
 
@@ -365,7 +362,7 @@ export class HudController {
     if (dataSource === 'ws' && ws?.readyState === WebSocket.OPEN) {
       dot.className = 'dot dot--live'; label.textContent = 'LIVE';
     } else {
-      dot.className = 'dot dot--demo'; label.textContent = 'DEMO';
+      dot.className = 'dot dot--offline'; label.textContent = 'NO HARDWARE DATA';
     }
   }
 
@@ -373,7 +370,7 @@ export class HudController {
   // HUD update (called every frame)
   // ============================================================
 
-  updateHUD(data, demoData) {
+  updateHUD(data) {
     if (!data) return;
     const vs = data.vital_signs || {};
     const feat = data.features || {};
@@ -381,10 +378,10 @@ export class HudController {
 
     // Sync scenario dropdown
     const quickSel = document.getElementById('scenario-quick-select');
-    const cur = demoData._autoMode ? 'auto' : demoData.currentScenario;
+    const cur = data.scenario || 'live';
     if (quickSel && quickSel.value !== cur) quickSel.value = cur;
     const autoIcon = document.getElementById('autoplay-icon');
-    if (autoIcon) autoIcon.className = demoData._autoMode ? '' : 'hidden';
+    if (autoIcon) autoIcon.className = 'hidden';
 
     const targetHr = vs.heart_rate_bpm || 0;
     const targetBr = vs.breathing_rate_bpm || 0;
@@ -439,7 +436,7 @@ export class HudController {
     if (fallEl) fallEl.style.display = cls.fall_detected ? 'block' : 'none';
 
     // Scenario description and edge modules
-    const scenarioKey = demoData._autoMode ? (demoData.currentScenario || 'auto') : (demoData.currentScenario || 'auto');
+    const scenarioKey = data.scenario || 'live';
     if (scenarioKey !== this._currentScenarioKey) {
       this._currentScenarioKey = scenarioKey;
       this._updateScenarioDescription(scenarioKey);

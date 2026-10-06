@@ -135,13 +135,21 @@ export class SensingTab {
               several live ESP32 nodes together; every selected node must
               contribute real CSI before finalization. It never generates demo data.
             </p>
-            <label for="calibrationNodeIds">Node IDs (comma separated)</label>
-            <input id="calibrationNodeIds" class="sensing-calibration-input" value="1" inputmode="numeric" autocomplete="off">
+            <label for="calibrationNodeIds">Node IDs (comma separated — example: 1,2,3)</label>
+            <input id="calibrationNodeIds" class="sensing-calibration-input" value="1,2,3" placeholder="Example: 1,2,3" inputmode="numeric" autocomplete="off">
             <div class="sensing-calibration-actions">
               <button id="calibrationUseLive" class="sensing-calibration-button">Use all live nodes</button>
               <button id="calibrationStart" class="sensing-calibration-button">Start empty-room capture</button>
               <button id="calibrationStop" class="sensing-calibration-button" disabled>Finalize</button>
               <button id="calibrationReset" class="sensing-calibration-button sensing-calibration-danger">Reset</button>
+            </div>
+            <div class="sensing-calibration-progress" aria-live="polite">
+              <div class="sensing-calibration-progress-track">
+                <div id="calibrationProgress" class="sensing-calibration-progress-fill" style="width:0%"></div>
+              </div>
+              <div id="calibrationProgressText" class="sensing-calibration-progress-text">
+                0% — 00:00 — nodes 0/0
+              </div>
             </div>
             <div id="calibrationStatus" class="sensing-calibration-status" role="status" aria-live="polite">
               Waiting for ESP32 frames.
@@ -329,6 +337,37 @@ export class SensingTab {
     if (stop) stop.disabled = !active;
   }
 
+  _formatCalibrationTime(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    return `${hours ? `${String(hours).padStart(2, '0')}:` : ''}${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  _setCalibrationProgress(status) {
+    const selected = (status?.source_node_ids || this._calibrationIdentity?.source_node_ids || [])
+      .map(Number).filter(Number.isInteger);
+    const observed = new Set((status?.observed_source_node_ids || []).map(Number));
+    const nodeTotal = selected.length;
+    const nodeDone = selected.filter((id) => observed.has(id)).length;
+    const frameTarget = Number(status?.min_frames || 0);
+    const durationTarget = Number(status?.min_duration_s || 0);
+    const frameProgress = frameTarget > 0 ? Math.min(1, Number(status?.frame_count || 0) / frameTarget) : 0;
+    const durationProgress = durationTarget > 0 ? Math.min(1, Number(status?.elapsed_s || 0) / durationTarget) : 0;
+    const nodeProgress = nodeTotal > 0 ? nodeDone / nodeTotal : 0;
+    // Global completion is gated by every selected node plus both server gates.
+    const progress = nodeTotal > 0 ? Math.round(Math.min(frameProgress, durationProgress, nodeProgress) * 100) : 0;
+    const bar = this.container.querySelector('#calibrationProgress');
+    const text = this.container.querySelector('#calibrationProgressText');
+    if (bar) bar.style.width = `${progress}%`;
+    if (text) {
+      const elapsed = this._formatCalibrationTime(status?.elapsed_s);
+      const target = durationTarget ? ` / ${this._formatCalibrationTime(durationTarget)}` : '';
+      text.textContent = `${progress}% — ${elapsed}${target} — nodes ${nodeDone}/${nodeTotal}`;
+    }
+  }
+
   async _startCalibration() {
     try {
       const nodeIds = this._calibrationNodeIds();
@@ -348,6 +387,7 @@ export class SensingTab {
       this._setCalibrationButtons(true);
       this._setCalibrationStatus('Capture started. Keep the room empty for at least 10 minutes.');
       this._startCalibrationPolling();
+      await this._refreshCalibrationStatus();
     } catch (error) {
       this._setCalibrationStatus(error.message, true);
     }
@@ -360,6 +400,14 @@ export class SensingTab {
       const result = await apiService.post('/api/v1/calibration/stop', this._calibrationIdentity);
       if (!result?.success) throw new Error(result?.error || 'Calibration is not complete yet.');
       this._stopCalibrationPolling();
+      this._setCalibrationProgress({
+        source_node_ids: result.source_node_ids || this._calibrationIdentity.source_node_ids,
+        observed_source_node_ids: result.source_node_ids || this._calibrationIdentity.source_node_ids,
+        frame_count: result.frame_count,
+        min_frames: result.frame_count,
+        elapsed_s: result.elapsed_s,
+        min_duration_s: result.elapsed_s,
+      });
       this._calibrationIdentity = null;
       this._setCalibrationButtons(false);
       this._setCalibrationStatus(`Calibration complete: ${result.frame_count} frames, baseline ready.`);
@@ -378,6 +426,7 @@ export class SensingTab {
       this._stopCalibrationPolling();
       this._calibrationIdentity = null;
       this._setCalibrationButtons(false);
+      this._setCalibrationProgress({ source_node_ids: [] });
       this._setCalibrationStatus('Calibration reset. Start a new empty-room capture after live frames arrive.');
     } catch (error) {
       this._setCalibrationStatus(error.message, true);
@@ -386,7 +435,7 @@ export class SensingTab {
 
   _startCalibrationPolling() {
     this._stopCalibrationPolling();
-    this._calibrationTimer = setInterval(() => void this._refreshCalibrationStatus(), 5000);
+    this._calibrationTimer = setInterval(() => void this._refreshCalibrationStatus(), 1000);
   }
 
   _stopCalibrationPolling() {
@@ -407,6 +456,7 @@ export class SensingTab {
       }
       const active = Boolean(status?.session_id);
       this._setCalibrationButtons(active);
+      this._setCalibrationProgress(status);
       const missing = status?.missing_source_node_ids?.length
         ? `; missing nodes: ${status.missing_source_node_ids.join(',')}`
         : '';

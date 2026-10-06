@@ -12,7 +12,6 @@ import { withWsTicket } from '../../services/ws-ticket.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-import { DemoDataGenerator } from './demo-data.js';
 import { NebulaBackground } from './nebula-background.js';
 import { PostProcessing } from './post-processing.js';
 import { FigurePool, SKELETON_PAIRS } from './figure-pool.js';
@@ -90,12 +89,8 @@ class Observatory {
 
     this._clock = new THREE.Clock();
 
-    // Data
-    this._demoData = new DemoDataGenerator();
-    this._demoData.setCycleDuration(this.settings.cycle || 30);
-    if (this.settings.scenario && this.settings.scenario !== 'auto') {
-      this._demoData.setScenario(this.settings.scenario);
-    }
+    // Data is live-only. With no ESP32 WebSocket frame the scene is empty;
+    // Observatory never substitutes generated people or vital signs.
     this._currentData = null;
     this._currentScenario = null;
 
@@ -401,7 +396,6 @@ class Observatory {
           this._autopilot = !this._autopilot;
           this._controls.enabled = !this._autopilot;
           break;
-        case 'd': this._demoData.cycleScenario(); break;
         case 'f':
           this._showFps = !this._showFps;
           document.getElementById('fps-counter').style.display = this._showFps ? 'block' : 'none';
@@ -409,7 +403,6 @@ class Observatory {
         case 's': this._hud.toggleSettings(); break;
         case ' ':
           e.preventDefault();
-          this._demoData.paused = !this._demoData.paused;
           break;
       }
     });
@@ -449,7 +442,9 @@ class Observatory {
 
     const tryNext = (i) => {
       if (i >= unique.length) {
-        console.log('[Observatory] No sensing server detected, using demo mode');
+        console.log('[Observatory] No sensing server detected; waiting for real ESP32 data');
+        this.settings.dataSource = 'offline';
+        this._hud.updateSourceBadge('offline', null);
         return;
       }
       const base = unique[i];
@@ -486,10 +481,10 @@ class Observatory {
       };
       this._ws.onmessage = (evt) => { try { this._liveData = JSON.parse(evt.data); } catch {} };
       this._ws.onclose = () => {
-        console.log('[Observatory] WebSocket closed, falling back to demo');
+        console.log('[Observatory] WebSocket closed; waiting for real ESP32 data');
         this._ws = null;
-        this.settings.dataSource = 'demo';
-        this._hud.updateSourceBadge('demo', null);
+        this.settings.dataSource = 'offline';
+        this._hud.updateSourceBadge('offline', null);
       };
       this._ws.onerror = () => {};
     } catch {}
@@ -510,22 +505,18 @@ class Observatory {
     const elapsed = this._clock.getElapsedTime();
 
     // Data source
-    if (this.settings.dataSource === 'ws' && this._liveData) {
-      this._currentData = this._liveData;
-    } else {
-      this._currentData = this._demoData.update(dt);
-    }
+    this._currentData = this._liveData;
     const data = this._currentData;
 
     // Updates
     this._nebula.update(dt, elapsed);
     this._figurePool.update(data, elapsed);
-    this._scenarioProps.update(data, this._demoData.currentScenario);
+    this._scenarioProps.update(data, null);
     this._updateDotMatrixMist(data, elapsed);
     this._updateParticleTrail(data, dt, elapsed);
     this._updateWifiWaves(elapsed);
     this._updateSignalField(data);
-    this._hud.updateHUD(data, this._demoData);
+    this._hud.updateHUD(data);
     this._hud.updateSparkline(data);
 
     // Router LED

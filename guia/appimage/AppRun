@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APPDIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+DATA_DIR="${RUVIEW_DATA_DIR:-$DATA_HOME/ruview/data}"
+mkdir -p "$DATA_DIR"
+
+if [[ "${CSI_SOURCE:-esp32}" != "esp32" ]]; then
+  echo "RuView solo admite CSI real de ESP32 en este AppImage (CSI_SOURCE debe ser esp32)." >&2
+  exit 2
+fi
+
+if [[ -n "${RUVIEW_UDP_ALLOW:-}" ]]; then
+  UDP_ALLOW="$RUVIEW_UDP_ALLOW"
+elif command -v ip >/dev/null 2>&1; then
+  UDP_ALLOW="$(ip -4 -o addr show scope global | awk 'NR == 1 {print $4}')"
+  UDP_ALLOW="${UDP_ALLOW:-127.0.0.1/32}"
+else
+  echo "No se pudo determinar la red local. Define RUVIEW_UDP_ALLOW=IP/CIDR antes de arrancar." >&2
+  exit 2
+fi
+
+SERVER=(
+  "$APPDIR/usr/lib/ruview/sensing-server"
+  --source esp32
+  --http-port "${RUVIEW_HTTP_PORT:-3000}"
+  --ws-port "${RUVIEW_WS_PORT:-3001}"
+  --udp-port "${RUVIEW_UDP_PORT:-5005}"
+  --udp-bind "${RUVIEW_UDP_BIND:-0.0.0.0}"
+  --udp-allow "$UDP_ALLOW"
+  --bind-addr "${RUVIEW_BIND_ADDR:-127.0.0.1}"
+  --ui-path "$APPDIR/usr/share/ruview/ui"
+  --data-dir "$DATA_DIR"
+)
+
+echo "RuView AppImage: ESP32 CSI real; allowlist UDP: $UDP_ALLOW"
+echo "Datos persistentes: $DATA_DIR"
+"${SERVER[@]}" &
+SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT INT TERM
+
+for _ in {1..40}; do
+  if curl -fsS "http://127.0.0.1:${RUVIEW_HTTP_PORT:-3000}/health" >/dev/null 2>&1; then
+    URL="http://127.0.0.1:${RUVIEW_HTTP_PORT:-3000}/ui/index.html"
+    echo "Interfaz: $URL"
+    if [[ "${RUVIEW_NO_BROWSER:-0}" != "1" ]] && command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$URL" >/dev/null 2>&1 || true
+    fi
+    break
+  fi
+  sleep 0.25
+done
+
+wait "$SERVER_PID"

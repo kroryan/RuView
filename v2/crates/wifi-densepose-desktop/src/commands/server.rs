@@ -139,14 +139,14 @@ pub async fn start_server(
     }
     configure_log_level(&mut cmd, config.log_level.as_deref());
 
-    // Default to explicit "simulated" demo mode when the desktop user hasn't
-    // chosen a source — this is the *Tauri demo* app, not a production
-    // sensing endpoint, so the demo default is correct here. Critically, the
-    // value passed downstream is the **explicit** "simulated", not "auto",
-    // which means the sensing-server will tag the data as synthetic in its
-    // API responses rather than silently fall back (issue #937 fix in
-    // sensing-server's `auto` handler).
-    let source = config.source.as_deref().unwrap_or("simulated");
+    // Desktop is hardware-only. Never silently start a simulator or accept a
+    // synthetic source from the UI/configuration.
+    let source = config.source.as_deref().unwrap_or("esp32");
+    if source != "esp32" {
+        return Err(format!(
+            "RuView Desktop accepts only the real ESP32 source; received '{source}'"
+        ));
+    }
     cmd.args(["--source", source]);
 
     // Redirect stdout/stderr to pipes for monitoring
@@ -354,7 +354,7 @@ pub async fn restart_server(
             log_level: None,
             bind_address: None,
             server_path: None,
-            source: None, // Falls through to explicit "simulated" — Tauri demo default.
+            source: Some("esp32".to_string()),
         }
     };
 
@@ -393,7 +393,7 @@ pub struct ServerConfig {
     pub log_level: Option<String>,
     pub bind_address: Option<String>,
     pub server_path: Option<String>,
-    /// Data source: "auto", "wifi", "esp32", "simulate"
+    /// Data source. The desktop accepts only "esp32".
     pub source: Option<String>,
 }
 
@@ -475,7 +475,7 @@ mod tests {
             log_level: None,
             bind_address: None,
             server_path: None,
-            source: Some("simulate".to_string()),
+            source: Some("esp32".to_string()),
         };
 
         assert_eq!(config.http_port, Some(8080));

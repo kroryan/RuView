@@ -69,6 +69,8 @@ __pycache__/
 mcp.json 
 
 # Distribution / packaging
+.AppImage
+releases/*.AppImage
 .Python
 build/
 develop-eggs/

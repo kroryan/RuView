@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=RuView ESP32 CSI
+Comment=RuView con datos reales de nodos ESP32
+Exec=RuView
+Icon=ruview
+Type=Application
+Categories=Utility;
+Terminal=true

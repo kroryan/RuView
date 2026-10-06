@@ -13,6 +13,9 @@ Esta carpeta contiene los ayudantes de hardware:
   contraseña sin guardarla en ningún archivo.
 - `start-ruview.sh`: arranca o comprueba RuView en modo ESP32 real; nunca activa
   el simulador.
+- `build-appimage.sh`: crea `releases/RuView-ESP32-x86_64.AppImage` con el
+  servidor Rust, UI, firmware y esta guía. El AppImage arranca siempre con
+  `--source esp32`; sin CSI real muestra que no hay hardware, no genera datos.
 
 Los scripts se ejecutan desde cualquier directorio y localizan automáticamente
 la raíz del repositorio. No mezcles una tabla de particiones de 8 MB con una
@@ -83,6 +86,41 @@ Esta instalación no usa el modo sintético. No arranques el contenedor con
 falsos y no sirven para validar una ESP32. El arranque de producción está en
 [Usar el ESP32](#usar-el-esp32) y fija `CSI_SOURCE=esp32`, con una allowlist UDP
 de los nodos reales.
+
+## AppImage portátil
+
+Una vez construida la imagen Docker local, crea el paquete portable así:
+
+```bash
+./guia/build-appimage.sh
+```
+
+El resultado queda en:
+
+```text
+releases/RuView-ESP32-x86_64.AppImage
+```
+
+En otro Linux x86_64 se ejecuta con doble clic o:
+
+```bash
+chmod +x releases/RuView-ESP32-x86_64.AppImage
+./releases/RuView-ESP32-x86_64.AppImage
+```
+
+No necesita Docker, Rust, Node ni una instalación de RuView. Guarda el estado
+en `~/.local/share/ruview/data` y abre el navegador automáticamente. La
+allowlist UDP se calcula con la primera interfaz IPv4 global; si la red usa
+varias interfaces, se puede fijar antes de arrancar:
+
+```bash
+RUVIEW_UDP_ALLOW=192.168.1.0/24 ./releases/RuView-ESP32-x86_64.AppImage
+```
+
+El paquete incluye los ayudantes de flasheo/provisionado y los binarios S3,
+pero el acceso USB sigue necesitando `esptool`/Python en el sistema destino.
+La configuración Wi‑Fi es dinámica: se hace con `provision-wifi.sh` y no se
+compila dentro del firmware. Para cambiar de red no hay que reflashear.
 
 Verificación rápida:
 

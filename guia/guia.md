@@ -471,7 +471,9 @@ mantén la habitación vacía durante unos 10 minutos.
 Desde la web, abre `http://127.0.0.1:3000/ui/index.html`, entra en **Sensing**
 y usa el panel **ROOM CALIBRATION**. Escribe los `node-id` separados por
 comas, pulsa **START EMPTY CAPTURE**, espera a que el contador alcance al menos
-10 minutos y 1000 frames, y pulsa **FINALIZE CALIBRATION**. La habitación debe
+10 minutos y 1000 frames, y pulsa **FINALIZE CALIBRATION**. Esos valores son
+mínimos, no un límite máximo: puedes dejar la captura más tiempo y acumular
+tantos frames como quieras antes de finalizar. La habitación debe
 permanecer vacía durante toda la captura. Si cambias la posición, pulsa
 **RESET CALIBRATION** y repite el proceso; no reutilices una calibración de otra
 habitación o de otro conjunto de nodos.

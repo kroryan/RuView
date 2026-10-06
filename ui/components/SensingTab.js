@@ -156,7 +156,8 @@ export class SensingTab {
                 <div><span>ELAPSED</span><strong id="calibrationElapsed">00:00</strong></div>
                 <div><span>TARGET</span><strong id="calibrationTarget">--:--</strong></div>
                 <div><span>NODES</span><strong id="calibrationNodeProgress">0 / 0</strong></div>
-                <div><span>FRAMES</span><strong id="calibrationFrameProgress">0 / 0</strong></div>
+                <div><span>FRAMES CAPTURED</span><strong id="calibrationFrameProgress">0</strong></div>
+                <div><span>MINIMUM REQUIRED</span><strong id="calibrationFrameMinimum">--</strong></div>
               </div>
               <div id="calibrationProgressText" class="sensing-calibration-progress-text">No active calibration.</div>
             </div>
@@ -373,13 +374,15 @@ export class SensingTab {
     const targetEl = this.container.querySelector('#calibrationTarget');
     const nodeEl = this.container.querySelector('#calibrationNodeProgress');
     const frameEl = this.container.querySelector('#calibrationFrameProgress');
+    const frameMinimumEl = this.container.querySelector('#calibrationFrameMinimum');
     const text = this.container.querySelector('#calibrationProgressText');
     if (bar) bar.style.width = `${progress}%`;
     if (percent) percent.textContent = `${progress}%`;
     if (elapsedEl) elapsedEl.textContent = this._formatCalibrationTime(status?.elapsed_s);
     if (targetEl) targetEl.textContent = durationTarget > 0 ? this._formatCalibrationTime(durationTarget) : '--:--';
     if (nodeEl) nodeEl.textContent = `${nodeDone} / ${nodeTotal}`;
-    if (frameEl) frameEl.textContent = `${Number(status?.frame_count || 0).toLocaleString()} / ${frameTarget ? frameTarget.toLocaleString() : '--'}`;
+    if (frameEl) frameEl.textContent = Number(status?.frame_count || 0).toLocaleString();
+    if (frameMinimumEl) frameMinimumEl.textContent = frameTarget ? frameTarget.toLocaleString() : '--';
     if (text) {
       const elapsed = this._formatCalibrationTime(status?.elapsed_s);
       const target = durationTarget ? ` / ${this._formatCalibrationTime(durationTarget)}` : '';
@@ -389,7 +392,7 @@ export class SensingTab {
       } else if (missing.length) {
         text.textContent = `Waiting for nodes: ${missing.join(', ')} — ${elapsed}${target}`;
       } else {
-        text.textContent = `All selected nodes are contributing — ${elapsed}${target}`;
+        text.textContent = `All selected nodes are contributing — ${elapsed}${target} — no maximum; finalize when ready.`;
       }
     }
   }

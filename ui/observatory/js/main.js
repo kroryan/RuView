@@ -113,6 +113,7 @@ class Observatory {
 
     // HUD controller (settings dialog, sparkline, vital displays)
     this._hud = new HudController(this);
+    this._hud.initRooms();
 
     // State
     this._autopilot = false;

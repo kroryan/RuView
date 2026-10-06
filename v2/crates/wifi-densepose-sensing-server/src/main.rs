@@ -38,6 +38,8 @@ mod rvf_pipeline;
 mod tracker_bridge;
 pub mod types;
 mod vital_signs;
+mod rooms;
+mod vitals_fusion;
 
 // Training pipeline modules (exposed via lib.rs)
 use wifi_densepose_sensing_server::{
@@ -2070,6 +2072,8 @@ struct AppStateInner {
     rvf_info: Option<RvfContainerInfo>,
     /// Path to save RVF container on shutdown (set via `--save-rvf`).
     save_rvf_path: Option<PathBuf>,
+    /// Room registry for room definitions
+    room_registry: rooms::RoomRegistry,
     /// Progressive loader for a trained model (set via `--model`).
     progressive_loader: Option<ProgressiveLoader>,
     /// Active SONA profile name.
@@ -3002,6 +3006,8 @@ impl AppStateInner {
             latest_vitals: VitalSigns::default(),
             rvf_info: None,
             save_rvf_path: None,
+            room_registry: rooms::RoomRegistry::default(),
+            data_dir: std::path::PathBuf::new(),
             progressive_loader: None,
             active_sona_profile: None,
             model_loaded: false,
@@ -6425,6 +6431,51 @@ fn fuse_multi_node_features(
             .fold(f64::NEG_INFINITY, f64::max),
     }
 }
+
+fn fuse_room_vitals(node_states: &HashMap<u8, NodeState>, now: std::time::Instant) -> VitalSigns {
+    let mut readings = Vec::new();
+    for (&id, n) in node_states.iter() {
+        if node_is_fresh(n, now) {
+            let (br, hr, brc, hrc, sq, moving) = if let Some(ref ev) = n.edge_vitals {
+                (
+                    (ev.breathing_rate_bpm > 0.0).then_some(ev.breathing_rate_bpm as f64),
+                    (ev.heartrate_bpm > 0.0).then_some(ev.heartrate_bpm as f64),
+                    if ev.presence { 0.7 } else { 0.0 },
+                    if ev.presence { 0.7 } else { 0.0 },
+                    ev.presence_score as f64,
+                    ev.motion,
+                )
+            } else {
+                (
+                    n.latest_vitals.breathing_rate_bpm,
+                    n.latest_vitals.heart_rate_bpm,
+                    n.latest_vitals.breathing_confidence,
+                    n.latest_vitals.heartbeat_confidence,
+                    n.latest_vitals.signal_quality,
+                    n.current_motion_level == "active",
+                )
+            };
+            readings.push(vitals_fusion::NodeVitalReading {
+                node_id: id,
+                breathing_bpm: br,
+                heart_bpm: hr,
+                breathing_confidence: brc,
+                heart_confidence: hrc,
+                signal_quality: sq,
+                moving,
+            });
+        }
+    }
+    let fused = vitals_fusion::fuse(&readings);
+    VitalSigns {
+        breathing_rate_bpm: fused.breathing.value,
+        heart_rate_bpm: fused.heart.value,
+        breathing_confidence: fused.breathing.confidence,
+        heartbeat_confidence: fused.heart.confidence,
+        signal_quality: fused.signal_quality,
+    }
+}
+
 
 /// Estimate person count from CSI features using a weighted composite heuristic.
 ///
@@ -12615,15 +12666,7 @@ async fn udp_receiver_task(
                         (vitals.presence_score as f64).min(1.0),
                         &[],
                     );
-                    let vital_candidates = VitalSigns {
-                        breathing_rate_bpm: (vitals.breathing_rate_bpm > 0.0)
-                            .then_some(vitals.breathing_rate_bpm),
-                        heart_rate_bpm: (vitals.heartrate_bpm > 0.0)
-                            .then_some(vitals.heartrate_bpm),
-                        breathing_confidence: if vitals.presence { 0.7 } else { 0.0 },
-                        heartbeat_confidence: if vitals.presence { 0.7 } else { 0.0 },
-                        signal_quality: vitals.presence_score as f64,
-                    };
+                    let vital_candidates = fuse_room_vitals(&s.node_states, now);
                     let explicit_calibration_fresh =
                         s.explicit_calibration_fresh_at(observed_at_unix_ms);
                     let calibrated_presence_evidence = s.calibrated_presence_evidence(
@@ -13141,9 +13184,10 @@ async fn udp_receiver_task(
                         total_persons,
                         calibrated_presence_evidence.as_ref(),
                     );
+                    let vital_candidates = fuse_room_vitals(&s.node_states, now);
                     let published_vitals = calibrated_vitals_for_publication(
                         &s,
-                        &vitals,
+                        &vital_candidates,
                         total_persons,
                         observed_at_unix_ms,
                     );
@@ -14696,6 +14740,7 @@ async fn main() {
         latest_vitals: VitalSigns::default(),
         rvf_info,
         save_rvf_path: args.save_rvf.clone(),
+        room_registry: rooms::load(&data_dir.join("rooms.json")).unwrap_or_default(),
         progressive_loader,
         active_sona_profile: None,
         model_loaded,
@@ -15101,6 +15146,10 @@ async fn main() {
         .route("/api/v1/info", get(api_info))
         .route("/api/v1/status", get(health_ready))
         .route("/api/v1/metrics", get(health_metrics))
+        // Rooms endpoints
+        .route("/api/v1/rooms", get(rooms_list).post(room_create))
+        .route("/api/v1/rooms/active", post(room_active_set))
+        .route("/api/v1/rooms/:id", axum::routing::delete(room_delete))
         // Sensing endpoints
         .route("/api/v1/sensing/latest", get(latest))
         .route("/api/v1/radar/latest", get(latest_realtek_radar))
@@ -16274,7 +16323,7 @@ async fn ws_ticket_handler(
     match auth.tickets().issue(grant) {
         Some(ticket) => (
             axum::http::StatusCode::OK,
-            axum::Json(serde_json::json!({
+            Json(serde_json::json!({
                 "ticket": ticket,
                 "expires_in_secs": wifi_densepose_sensing_server::ws_ticket::TICKET_TTL.as_secs(),
                 "usage": "append as ?ticket=<value> to the WebSocket URL; valid once",
@@ -16477,13 +16526,13 @@ fn now_millis() -> u128 {
 async fn oauth_status(
     axum::Extension(auth): axum::Extension<wifi_densepose_sensing_server::bearer_auth::AuthState>,
     headers: axum::http::HeaderMap,
-) -> axum::Json<serde_json::Value> {
+) -> Json<serde_json::Value> {
     use wifi_densepose_sensing_server::browser_session as bs;
     let raw = headers
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok());
     let session = raw.and_then(bs::from_cookie_header);
-    axum::Json(serde_json::json!({
+    Json(serde_json::json!({
         "auth_required": auth.is_enabled(),
         "oauth_enabled": auth.oauth_enabled(),
         "browser_signin": auth.oauth_enabled() && bs::is_configured(),
@@ -16938,5 +16987,71 @@ mod issue_2088_data_dir_tests {
         let Json(v) = delete_model(State(state), Path("dd_model_2088".to_string())).await;
         assert_eq!(v["success"], true, "delete failed: {v}");
         assert!(!models_dir.join("dd_model_2088.rvf").exists());
+    }
+}
+
+// --- Rooms API Endpoints ---
+async fn rooms_list(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "rooms": s.room_registry.rooms,
+        "active_room_id": s.room_registry.active_room_id,
+    }))
+}
+
+async fn room_create(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>
+) -> impl axum::response::IntoResponse {
+    let mut s = state.write().await;
+    let name = payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let node_ids: Vec<u8> = payload.get("node_ids")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_u64().map(|u| u as u8)).collect())
+        .unwrap_or_default();
+    match s.room_registry.create(name, &node_ids, chrono::Utc::now().timestamp() as u64) {
+        Ok(id) => {
+            let data_dir = s.data_dir.clone();
+            rooms::save(&data_dir.join("rooms.json"), &s.room_registry).ok();
+            (axum::http::StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
+        },
+        Err(e) => {
+            (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": format!("{:?}", e) }))).into_response()
+        }
+    }
+}
+
+async fn room_active_set(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>
+) -> impl axum::response::IntoResponse {
+    let mut s = state.write().await;
+    let id_opt = payload.get("id").filter(|v| !v.is_null()).and_then(|v| v.as_str());
+    match s.room_registry.set_active(id_opt) {
+        Ok(_) => {
+            let data_dir = s.data_dir.clone();
+            rooms::save(&data_dir.join("rooms.json"), &s.room_registry).ok();
+            (axum::http::StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
+        },
+        Err(e) => {
+            (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": format!("{:?}", e) }))).into_response()
+        }
+    }
+}
+
+async fn room_delete(
+    State(state): State<SharedState>,
+    Path(id): Path<String>
+) -> impl axum::response::IntoResponse {
+    let mut s = state.write().await;
+    match s.room_registry.delete(&id) {
+        Ok(_) => {
+            let data_dir = s.data_dir.clone();
+            rooms::save(&data_dir.join("rooms.json"), &s.room_registry).ok();
+            (axum::http::StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
+        },
+        Err(e) => {
+            (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": format!("{:?}", e) }))).into_response()
+        }
     }
 }

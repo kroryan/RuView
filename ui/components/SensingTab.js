@@ -30,6 +30,7 @@ export class SensingTab {
     this._initSplatRenderer();
     this._connectService();
     this._setupCalibration();
+    await this._loadRooms();
     this._refreshCalibrationStatus();
     this._setupResize();
   }
@@ -136,6 +137,11 @@ export class SensingTab {
               several live ESP32 nodes together; every selected node must
               contribute real CSI before finalization. It never generates demo data.
             </p>
+            <label for="sensingRoomSelect">Select Room</label>
+            <select id="sensingRoomSelect" class="sensing-calibration-input">
+              <option value="">No Room Selected</option>
+            </select>
+            <br>
             <label for="calibrationNodeIds">Node IDs (comma separated — example: 1,2,3)</label>
             <input id="calibrationNodeIds" class="sensing-calibration-input" value="1,2,3" placeholder="Example: 1,2,3" inputmode="numeric" autocomplete="off">
             <div class="sensing-calibration-actions">
@@ -281,6 +287,45 @@ export class SensingTab {
       const cfg = bannerConfig[dataSource] || bannerConfig.reconnecting;
       banner.textContent = cfg.text;
       banner.className = 'sensing-source-banner ' + cfg.cls;
+    }
+  }
+
+  async _loadRooms() {
+    const sel = this.container.querySelector('#sensingRoomSelect');
+    if (!sel) return;
+    try {
+      const res = await fetch('/api/v1/rooms');
+      if (res.ok) {
+        const data = await res.json();
+        sel.innerHTML = '<option value="">No Room Selected</option>' + data.rooms.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+        if (data.active_room_id) {
+          sel.value = data.active_room_id;
+          const activeRoom = data.rooms.find(r => r.id === data.active_room_id);
+          if (activeRoom) {
+            const input = this.container.querySelector('#calibrationNodeIds');
+            if (input) input.value = activeRoom.node_ids.join(',');
+          }
+        }
+      }
+      sel.addEventListener('change', async (e) => {
+        const id = e.target.value;
+        const resp = await fetch('/api/v1/rooms/active', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id || null })
+        });
+        if (resp.ok && id) {
+          const res2 = await fetch('/api/v1/rooms');
+          const data2 = await res2.json();
+          const r = data2.rooms.find(r => r.id === id);
+          if (r) {
+            const input = this.container.querySelector('#calibrationNodeIds');
+            if (input) input.value = r.node_ids.join(',');
+          }
+        }
+      });
+    } catch (e) {
+      console.error('Failed to load rooms for SensingTab', e);
     }
   }
 

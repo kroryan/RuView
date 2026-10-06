@@ -14,7 +14,15 @@ fi
 if [[ -n "${RUVIEW_UDP_ALLOW:-}" ]]; then
   UDP_ALLOW="$RUVIEW_UDP_ALLOW"
 elif command -v ip >/dev/null 2>&1; then
-  UDP_ALLOW="$(ip -4 -o addr show scope global | awk 'NR == 1 {print $4}')"
+  # Prefer the kernel's canonical network route (e.g. 192.168.1.0/24),
+  # rather than passing the host address with a prefix (192.168.1.149/24).
+  DEFAULT_DEV="$(ip -4 route show default | awk 'NR == 1 {print $5}')"
+  if [[ -n "$DEFAULT_DEV" ]]; then
+    UDP_ALLOW="$(ip -4 route show dev "$DEFAULT_DEV" scope link | awk '$1 ~ /^[0-9]+\./ {print $1; exit}')"
+  else
+    UDP_ALLOW="$(ip -4 route show scope link | awk '$1 ~ /^[0-9]+\./ {print $1; exit}')"
+  fi
+  UDP_ALLOW="${UDP_ALLOW:-$(ip -4 -o addr show scope global | awk 'NR == 1 {print $4}')}"
   UDP_ALLOW="${UDP_ALLOW:-127.0.0.1/32}"
 else
   echo "No se pudo determinar la red local. Define RUVIEW_UDP_ALLOW=IP/CIDR antes de arrancar." >&2

@@ -479,7 +479,11 @@ habitación o de otro conjunto de nodos.
 Con varios nodos, pulsa **Use all live nodes** para rellenar automáticamente
 todos los IDs que estén transmitiendo y después inicia una única captura
 conjunta. La finalización no se permite mientras falte CSI de cualquiera de
-los nodos seleccionados.
+los nodos seleccionados. Al pulsar **START EMPTY CAPTURE**, la UI espera y
+reintenta automáticamente durante el calentamiento inicial de la cuadrícula
+CSI (hasta 45 segundos); no hay que pulsar el botón varias veces. Si después
+de ese tiempo sigue apareciendo `eligible raw CSI grid`, comprueba que los
+nodos estén transmitiendo CSI real y que la allowlist UDP incluya su red.
 
 Si el panel no aparece, abre la URL principal anterior (no
 `observatory.html`) y fuerza una recarga con `Ctrl+Shift+R`. La aplicación

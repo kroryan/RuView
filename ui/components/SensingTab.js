@@ -21,6 +21,7 @@ export class SensingTab {
     this._threeLoaded = false;
     this._calibrationTimer = null;
     this._calibrationIdentity = null;
+    this._calibrationStartToken = 0;
   }
 
   async init() {
@@ -394,14 +395,40 @@ export class SensingTab {
   }
 
   async _startCalibration() {
+    const startToken = ++this._calibrationStartToken;
     try {
       const nodeIds = this._calibrationNodeIds();
       const digest = await this._roomBindingDigest(nodeIds);
       const query = nodeIds.length === 1 ? `?source_node_id=${nodeIds[0]}` : '';
-      const result = await apiService.post(`/api/v1/calibration/start${query}`, {
+      const request = {
         binding_digest: digest,
         source_node_ids: nodeIds,
-      });
+      };
+      const start = this.container.querySelector('#calibrationStart');
+      const stop = this.container.querySelector('#calibrationStop');
+      if (start) start.disabled = true;
+      if (stop) stop.disabled = true;
+
+      // The server deliberately requires a stable raw CSI grid with at least
+      // 10 seconds of measured evidence. On a cold AppImage start, retry the
+      // same real-hardware request instead of making the user guess or click
+      // repeatedly. No data is generated during this warm-up.
+      let result = null;
+      const maxWarmupAttempts = 45;
+      for (let attempt = 0; attempt <= maxWarmupAttempts; attempt += 1) {
+        if (startToken !== this._calibrationStartToken) return;
+        result = await apiService.post(`/api/v1/calibration/start${query}`, request);
+        if (result?.success) break;
+        const message = String(result?.error || '');
+        const needsRawGrid = /eligible raw CSI grid|raw CSI grid|source_required|grid_unavailable/i.test(message);
+        if (!needsRawGrid || attempt === maxWarmupAttempts) break;
+        this._setCalibrationStatus(
+          `Waiting for stable raw CSI from nodes ${nodeIds.join(', ')} ` +
+          `(${attempt + 1}/${maxWarmupAttempts}). Keep them powered and connected.`,
+          false,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
       if (!result?.success) throw new Error(result?.error || 'Calibration could not start.');
       this._calibrationIdentity = {
         boot_epoch: result.boot_epoch,
@@ -414,6 +441,8 @@ export class SensingTab {
       this._startCalibrationPolling();
       await this._refreshCalibrationStatus();
     } catch (error) {
+      if (startToken !== this._calibrationStartToken) return;
+      this._setCalibrationButtons(false);
       this._setCalibrationStatus(error.message, true);
     }
   }
@@ -442,6 +471,7 @@ export class SensingTab {
   }
 
   async _resetCalibration() {
+    this._calibrationStartToken += 1;
     try {
       const status = await apiService.get('/api/v1/calibration/status');
       const result = await apiService.post('/api/v1/calibration/reset', {

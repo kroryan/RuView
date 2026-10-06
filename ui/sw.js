@@ -1,11 +1,16 @@
 // RuView Service Worker - Offline caching for the dashboard shell
 // Strategy: Network-first for API calls, Cache-first for static assets
 
-// Bumped from v1: an older SW cached `/oauth/status` cache-first, so browsers
+// Bumped from v3: the hardware view changed from generated antenna values to
+// measured CSI, and demo/mock entry points were removed from the production UI.
+// Bumped from v2: the dashboard shell changed and must expose the real-room
+// calibration controls to existing clients. Browsers already running an older
+// worker need a new cache name so the updated SensingTab is fetched.
+// An older SW cached `/oauth/status` cache-first, so browsers
 // that ran it hold a permanently signed-out answer. `activate` deletes every
 // cache whose name is not CACHE_NAME, so bumping is what evicts it from clients
 // already in the field. Bump again if a future change poisons the cache.
-const CACHE_NAME = 'ruview-v2';
+const CACHE_NAME = 'ruview-v5';
 
 // Requests whose response depends on the caller's credentials. These must never
 // be served from the Cache API.
@@ -40,7 +45,6 @@ const SHELL_ASSETS = [
   '/services/sensing.service.js',
   '/services/pose.service.js',
   '/services/stream.service.js',
-  '/utils/backend-detector.js',
   '/utils/keyboard-shortcuts.js',
   '/utils/perf-monitor.js',
   '/utils/toast.js',

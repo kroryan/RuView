@@ -114,6 +114,7 @@ export class DashboardTab {
     const config = {
       'live':              { text: 'ESP32',     status: 'healthy', msg: 'Real hardware connected' },
       'server-simulated':  { text: 'SIMULATED', status: 'warning', msg: 'Server running without hardware' },
+      'waiting-for-hardware': { text: 'ESP32 WAITING', status: 'degraded', msg: 'Server is configured for ESP32; waiting for the first hardware frame' },
       'reconnecting':      { text: 'RECONNECTING', status: 'degraded', msg: 'Attempting to connect...' },
       'unreachable':       { text: 'NO DATA',   status: 'unhealthy', msg: 'Server unreachable — readings below are stale' },
       'simulated':         { text: 'INVENTED',  status: 'unhealthy', msg: 'Browser-generated data, not measured' },

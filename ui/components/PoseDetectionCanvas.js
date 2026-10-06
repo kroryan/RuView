@@ -97,7 +97,6 @@ export class PoseDetectionCanvas {
             <button class="btn btn-start" id="start-btn-${this.containerId}">&#9654; Start</button>
             <button class="btn btn-stop" id="stop-btn-${this.containerId}" disabled>&#9632; Stop</button>
             <button class="btn btn-reconnect" id="reconnect-btn-${this.containerId}" disabled>&#8635; Reconnect</button>
-            <button class="btn btn-demo" id="demo-btn-${this.containerId}">&#9881; Demo</button>
             <select class="mode-select" id="mode-select-${this.containerId}">
               <option value="skeleton">Skeleton</option>
               <option value="keypoints">Keypoints</option>
@@ -436,10 +435,6 @@ export class PoseDetectionCanvas {
     // Reconnect button
     const reconnectBtn = document.getElementById(`reconnect-btn-${this.containerId}`);
     reconnectBtn.addEventListener('click', () => this.reconnect());
-
-    // Demo button
-    const demoBtn = document.getElementById(`demo-btn-${this.containerId}`);
-    demoBtn.addEventListener('click', () => this.toggleDemo());
 
     // Trail toggle button
     const trailBtn = document.getElementById(`trail-btn-${this.containerId}`);

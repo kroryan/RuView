@@ -856,6 +856,50 @@ body {
   gap: var(--space-24);
 }
 
+.hardware-source-banner {
+  display: block;
+  margin: var(--space-16) 0 var(--space-8);
+  padding: var(--space-12);
+  border-radius: var(--radius-base);
+  text-align: center;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+}
+
+.hardware-source-live {
+  color: #0a7a52;
+  background: rgba(0, 204, 136, 0.14);
+  border: 1px solid #00cc88;
+}
+
+.hardware-source-waiting {
+  color: var(--color-text-secondary);
+  background: var(--color-secondary);
+  border: 1px solid var(--color-card-border);
+}
+
+.hardware-node-list {
+  display: grid;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+}
+
+.hardware-node-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: var(--space-12);
+  background: var(--color-surface);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-base);
+}
+
+.hardware-node-row span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
 @media (max-width: 768px) {
   .hardware-grid {
     grid-template-columns: 1fr;
@@ -1922,6 +1966,63 @@ canvas {
   background: rgba(255, 165, 0, 0.15);
   border: 1px solid #ffa500;
   color: #ffa500;
+}
+
+.sensing-source-waiting {
+  background: rgba(255, 165, 0, 0.12);
+  border: 1px solid #ffa500;
+  color: #ffa500;
+}
+
+.sensing-calibration-input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 8px;
+  box-sizing: border-box;
+  color: var(--color-text);
+  background: var(--color-surface, #111820);
+  border: 1px solid var(--color-border, #34404c);
+  border-radius: 4px;
+  font-family: var(--font-family-mono);
+}
+
+.sensing-calibration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sensing-calibration-button {
+  padding: 6px 8px;
+  color: var(--color-text, #e8eef5);
+  background: var(--color-primary-dark, #164b4f);
+  border: 1px solid var(--color-primary, #32b8c6);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.sensing-calibration-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sensing-calibration-danger {
+  border-color: var(--color-error, #ef4444);
+  background: transparent;
+}
+
+.sensing-calibration-status {
+  margin-top: 8px;
+  color: var(--color-text-secondary, #9aa8b5);
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sensing-calibration-error {
+  color: var(--color-error, #ef4444);
 }
 
 .sensing-source-simulated {

@@ -31,7 +31,6 @@
         <nav class="nav-tabs" role="tablist" aria-label="Main navigation">
             <button class="nav-tab active" data-tab="dashboard" role="tab" aria-selected="true" aria-controls="dashboard">Dashboard</button>
             <button class="nav-tab" data-tab="hardware" role="tab" aria-selected="false" aria-controls="hardware">Hardware</button>
-            <button class="nav-tab" data-tab="demo" role="tab" aria-selected="false" aria-controls="demo">Live Demo</button>
             <button class="nav-tab" data-tab="architecture" role="tab" aria-selected="false" aria-controls="architecture">Architecture</button>
             <button class="nav-tab" data-tab="performance" role="tab" aria-selected="false" aria-controls="performance">Performance</button>
             <button class="nav-tab" data-tab="applications" role="tab" aria-selected="false" aria-controls="applications">Applications</button>
@@ -190,36 +189,14 @@
 
         <!-- Hardware Tab -->
         <section id="hardware" class="tab-content" role="tabpanel" aria-labelledby="hardware" aria-hidden="true">
-            <h2>Hardware Configuration</h2>
+            <h2>ESP32 Hardware — Live CSI</h2>
             
             <div class="hardware-grid">
                 <div class="antenna-section">
-                    <h3>3×3 Antenna Array</h3>
-                    <p class="help-text">Click antennas to toggle their state</p>
-                    <div class="antenna-array">
-                        <div class="antenna-grid">
-                            <div class="antenna tx active" data-type="TX1"></div>
-                            <div class="antenna tx active" data-type="TX2"></div>
-                            <div class="antenna tx active" data-type="TX3"></div>
-                            <div class="antenna rx active" data-type="RX1"></div>
-                            <div class="antenna rx active" data-type="RX2"></div>
-                            <div class="antenna rx active" data-type="RX3"></div>
-                            <div class="antenna rx active" data-type="RX4"></div>
-                            <div class="antenna rx active" data-type="RX5"></div>
-                            <div class="antenna rx active" data-type="RX6"></div>
-                        </div>
-                        <div class="antenna-legend">
-                            <div class="legend-item">
-                                <div class="legend-color tx"></div>
-                                <span>Transmitters (3)</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-color rx"></div>
-                                <span>Receivers (6)</span>
-                            </div>
-                        </div>
-                        <div class="array-status"></div>
-                    </div>
+                    <h3>Measured node stream</h3>
+                    <div id="hardwareSourceBanner" class="hardware-source-banner hardware-source-waiting">CHECKING ESP32 CSI...</div>
+                    <p id="hardwareSourceState" class="help-text">Waiting for measured CSI frames.</p>
+                    <div id="hardwareNodeList" class="hardware-node-list"></div>
                 </div>
 
                 <div class="config-section">
@@ -230,16 +207,16 @@
                             <div class="config-value">2.4GHz ± 20MHz</div>
                         </div>
                         <div class="config-item">
+                            <label>Live nodes</label>
+                            <div id="hardwareNodeCount" class="config-value">—</div>
+                        </div>
+                        <div class="config-item">
+                            <label>CSI rate</label>
+                            <div id="hardwareRate" class="config-value">—</div>
+                        </div>
+                        <div class="config-item">
                             <label>Subcarriers</label>
-                            <div class="config-value">30</div>
-                        </div>
-                        <div class="config-item">
-                            <label>Sampling Rate</label>
-                            <div class="config-value">100 Hz</div>
-                        </div>
-                        <div class="config-item">
-                            <label>Total Cost</label>
-                            <div class="config-value">$30</div>
+                            <div id="hardwareSubcarriers" class="config-value">—</div>
                         </div>
                     </div>
 
@@ -249,70 +226,17 @@
                             <div class="csi-row">
                                 <span>Amplitude:</span>
                                 <div class="csi-bar">
-                                    <div class="csi-fill amplitude" style="width: 75%"></div>
+                                    <div class="csi-fill amplitude" style="width: 0%"></div>
                                 </div>
-                                <span class="csi-value">0.75</span>
+                                <span id="hardwareAmplitude" class="csi-value">—</span>
                             </div>
                             <div class="csi-row">
                                 <span>Phase:</span>
                                 <div class="csi-bar">
-                                    <div class="csi-fill phase" style="width: 60%"></div>
+                                    <div class="csi-fill phase" style="width: 0%"></div>
                                 </div>
-                                <span class="csi-value">1.2π</span>
+                                <span id="hardwarePhase" class="csi-value">Unavailable — amplitude-only CSI</span>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Demo Tab -->
-        <section id="demo" class="tab-content" role="tabpanel" aria-labelledby="demo" aria-hidden="true">
-            <h2>Live Demonstration</h2>
-            
-            <div class="demo-controls">
-                <button id="startDemo" class="btn btn--primary">Start Stream</button>
-                <button id="stopDemo" class="btn btn--secondary" disabled>Stop Stream</button>
-                <div class="demo-status">
-                    <span class="status status--info" id="demoStatus">Ready</span>
-                </div>
-            </div>
-
-            <div class="demo-grid">
-                <div class="signal-panel">
-                    <h3>WiFi Signal Analysis</h3>
-                    <div class="signal-display">
-                        <canvas id="signalCanvas" width="400" height="200"></canvas>
-                    </div>
-                    <div class="signal-metrics">
-                        <div class="metric">
-                            <span>Signal Strength:</span>
-                            <span id="signalStrength">-45 dBm</span>
-                        </div>
-                        <div class="metric">
-                            <span>Processing Latency:</span>
-                            <span id="latency">12 ms</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="pose-panel">
-                    <h3>Human Pose Detection</h3>
-                    <div class="pose-display">
-                        <canvas id="poseCanvas" width="400" height="300"></canvas>
-                    </div>
-                    <div class="detection-info">
-                        <div class="info-item">
-                            <span>Persons Detected:</span>
-                            <span id="personCount">0</span>
-                        </div>
-                        <div class="info-item">
-                            <span>Confidence:</span>
-                            <span id="confidence">0.0%</span>
-                        </div>
-                        <div class="info-item">
-                            <span>Keypoints:</span>
-                            <span id="keypoints">0/0</span>
                         </div>
                     </div>
                 </div>

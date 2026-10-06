@@ -3,13 +3,11 @@
 import { TabManager } from './components/TabManager.js';
 import { DashboardTab } from './components/DashboardTab.js';
 import { HardwareTab } from './components/HardwareTab.js';
-import { LiveDemoTab } from './components/LiveDemoTab.js';
 import { SensingTab } from './components/SensingTab.js';
 import { apiService } from './services/api.service.js';
 import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
 import { sensingService } from './services/sensing.service.js';
-import { backendDetector } from './utils/backend-detector.js';
 import { KeyboardShortcuts } from './utils/keyboard-shortcuts.js';
 import { PerfMonitor } from './utils/perf-monitor.js';
 import { toastManager } from './utils/toast.js';
@@ -76,37 +74,25 @@ class WiFiDensePoseApp {
       return response;
     });
 
-    // Detect backend availability and initialize accordingly
-    const useMock = await backendDetector.shouldUseMockServer();
-    
-    if (useMock) {
-      console.log('🧪 Initializing with mock server for testing');
-      // Import and start mock server only when needed
-      const { mockServer } = await import('./utils/mock-server.js');
-      mockServer.start();
-      
-      // Show notification to user
-      this.showBackendStatus('Mock server active - testing mode', 'warning');
-    } else {
-      console.log('🔌 Connecting to backend...');
-
-      try {
-        const health = await healthService.checkLiveness();
-        console.log('✅ Backend responding:', health);
-        this.showBackendStatus('Connected to Rust sensing server', 'success');
-      } catch (error) {
-        console.warn('⚠️ Backend not available:', error.message);
-        this.showBackendStatus('Backend unavailable — start sensing-server', 'warning');
-      }
-
-      // Mount the global provenance bar before the service starts, so the very
-      // first non-live state is visible on whichever tab is showing.
-      dataSourceBanner.init();
-
-      // Start the sensing WebSocket service early so the dashboard and
-      // live-demo tabs can show the correct data-source status immediately.
-      sensingService.start();
+    // Production UI is hardware-only. A missing backend is an unavailable
+    // state; it must never activate a mock server or invent measurements.
+    console.log('🔌 Connecting to the real RuView backend...');
+    try {
+      const health = await healthService.checkLiveness();
+      console.log('✅ Backend responding:', health);
+      this.showBackendStatus('Connected to Rust sensing server', 'success');
+    } catch (error) {
+      console.warn('⚠️ Backend not available:', error.message);
+      this.showBackendStatus('Backend unavailable — no measured data', 'warning');
     }
+
+    // Mount the global provenance bar before the service starts, so the very
+    // first non-live state is visible on whichever tab is showing.
+    dataSourceBanner.init();
+
+    // Start the sensing WebSocket service early so all live views consume the
+    // same real ESP32 stream.
+    sensingService.start();
   }
 
   // Initialize UI components
@@ -146,13 +132,6 @@ class WiFiDensePoseApp {
     if (hardwareContainer) {
       this.components.hardware = new HardwareTab(hardwareContainer);
       this.components.hardware.init();
-    }
-
-    // Live demo tab
-    const demoContainer = document.getElementById('demo');
-    if (demoContainer) {
-      this.components.demo = new LiveDemoTab(demoContainer);
-      this.components.demo.init();
     }
 
     // Sensing tab

@@ -122,7 +122,7 @@ export class LiveDemoTab {
       const tryAutoStart = () => {
         if (this._autoStartOnce || this.state.isActive) return;
         const ds = sensingService.dataSource;
-        if (ds === 'live' || ds === 'server-simulated') {
+        if (ds === 'live') {
           this._autoStartOnce = true;
           this.logger.info('Auto-starting pose detection (data source: ' + ds + ')');
           this.startDemo();
@@ -162,7 +162,6 @@ export class LiveDemoTab {
             <div class="demo-controls">
               <button class="btn btn--primary" id="start-enhanced-demo">Start Detection</button>
               <button class="btn btn--secondary" id="stop-enhanced-demo" disabled>Stop Detection</button>
-              <button class="btn btn--accent" id="run-offline-demo">Demo</button>
               <button class="btn btn--primary" id="toggle-debug">Debug Mode</button>
               <select class="zone-select" id="zone-selector">
                 <option value="zone_1">Zone 1</option>
@@ -1033,16 +1032,6 @@ export class LiveDemoTab {
 
     if (stopBtn) {
       stopBtn.addEventListener('click', () => this.stopDemo());
-    }
-
-    // Offline demo button — runs client-side animated demo (no server needed)
-    const offlineDemoBtn = this.container.querySelector('#run-offline-demo');
-    if (offlineDemoBtn) {
-      offlineDemoBtn.addEventListener('click', () => {
-        if (this.components.poseCanvas) {
-          this.components.poseCanvas.toggleDemo();
-        }
-      });
     }
 
     if (debugBtn) {

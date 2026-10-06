@@ -8588,6 +8588,40 @@ fn calibrated_vitals_for_publication(
     vitals_for_publication(candidates, true, evidence.person_count)
 }
 
+/// Once a fresh field-model result exists, the UI must not continue rendering
+/// the legacy activity heuristic as a person. The heuristic is still useful as
+/// diagnostic context (`room_inference`/features), but RF activity from an AP
+/// or phone must not become a moving figure in Observatory.
+fn calibrated_ui_presence(
+    legacy_classification: ClassificationInfo,
+    legacy_person_count: usize,
+    evidence: Option<&CalibratedPresenceEvidence>,
+) -> (ClassificationInfo, usize) {
+    let Some(evidence) = evidence else {
+        return (legacy_classification, legacy_person_count);
+    };
+
+    if evidence.presence {
+        (
+            ClassificationInfo {
+                motion_level: legacy_classification.motion_level,
+                presence: true,
+                confidence: legacy_classification.confidence,
+            },
+            evidence.person_count,
+        )
+    } else {
+        (
+            ClassificationInfo {
+                motion_level: "absent".to_string(),
+                presence: false,
+                confidence: 0.0,
+            },
+            0,
+        )
+    }
+}
+
 fn edge_vitals_message_for_publication(
     raw: &Esp32VitalsPacket,
     published_vitals: Option<&VitalSigns>,
@@ -12592,6 +12626,16 @@ async fn udp_receiver_task(
                     };
                     let explicit_calibration_fresh =
                         s.explicit_calibration_fresh_at(observed_at_unix_ms);
+                    let calibrated_presence_evidence = s.calibrated_presence_evidence(
+                        node_id,
+                        tick,
+                        chrono::Utc::now().timestamp_millis().max(0) as u64,
+                    );
+                    let (classification, total_persons) = calibrated_ui_presence(
+                        classification,
+                        total_persons,
+                        calibrated_presence_evidence.as_ref(),
+                    );
                     let published_vitals = calibrated_vitals_for_publication(
                         &s,
                         &vital_candidates,
@@ -12614,11 +12658,6 @@ async fn udp_receiver_task(
                         let _ = s.tx.send(json);
                     }
 
-                    let calibrated_presence_evidence = s.calibrated_presence_evidence(
-                        node_id,
-                        tick,
-                        chrono::Utc::now().timestamp_millis().max(0) as u64,
-                    );
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -13092,6 +13131,16 @@ async fn udp_receiver_task(
                         now,
                         observed_at_unix_ms,
                     );
+                    let calibrated_presence_evidence = s.calibrated_presence_evidence(
+                        node_id,
+                        tick,
+                        chrono::Utc::now().timestamp_millis().max(0) as u64,
+                    );
+                    let (room_classification, total_persons) = calibrated_ui_presence(
+                        room_classification,
+                        total_persons,
+                        calibrated_presence_evidence.as_ref(),
+                    );
                     let published_vitals = calibrated_vitals_for_publication(
                         &s,
                         &vitals,
@@ -13099,11 +13148,6 @@ async fn udp_receiver_task(
                         observed_at_unix_ms,
                     );
 
-                    let calibrated_presence_evidence = s.calibrated_presence_evidence(
-                        node_id,
-                        tick,
-                        chrono::Utc::now().timestamp_millis().max(0) as u64,
-                    );
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,

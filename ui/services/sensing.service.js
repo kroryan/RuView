@@ -6,9 +6,9 @@ import { apiService } from './api.service.js';
  * Manages the connection to the Python sensing WebSocket server
  * (ws://localhost:8765) and provides a callback-based API for the UI.
  *
- * Falls back to simulated data only after MAX_RECONNECT_ATTEMPTS exhausted.
- * While reconnecting the service stays in "reconnecting" state and does NOT
- * emit simulated frames so the UI can clearly distinguish live vs. fallback data.
+ * Production never invents frames. While reconnecting the service stays in a
+ * non-live state and emits no synthetic data, so the UI can clearly
+ * distinguish real ESP32 measurements from an unavailable stream.
  */
 
 const SENSING_WS_PORT_BY_HTTP_PORT = {
@@ -32,10 +32,10 @@ export function buildSensingWsUrl(locationLike = (typeof window !== 'undefined' 
 const SENSING_WS_URL = buildSensingWsUrl();
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 const MAX_RECONNECT_ATTEMPTS = 20;
-// Number of failed attempts that must occur before simulation starts.
-// This prevents the UI from flashing "SIMULATED" on a brief hiccup.
-const SIM_FALLBACK_AFTER_ATTEMPTS = 5;
-const SIMULATION_INTERVAL = 500; // ms
+// Kept for compatibility with the isolated demo generator; production never
+// permits the browser to turn a missing ESP32 stream into measurements.
+const SIM_FALLBACK_AFTER_ATTEMPTS = Number.POSITIVE_INFINITY;
+const SIMULATION_INTERVAL = 500; // ms (demo/test code only)
 
 export const SIM_FALLBACK_STORAGE_KEY = 'ruview-client-simulation';
 
@@ -58,16 +58,7 @@ export const SIM_FALLBACK_STORAGE_KEY = 'ruview-client-simulation';
  * Repository rule: never present synthetic output as measurement (CLAUDE.md).
  */
 function clientSimulationAllowed() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('simulate') === '1') return true;
-    if (params.get('simulate') === '0') return false;
-  } catch { /* no window/location — non-browser test context */ }
-  try {
-    return localStorage.getItem(SIM_FALLBACK_STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 export class SensingService {
@@ -93,10 +84,11 @@ export class SensingService {
     this._authRequired = null;
     // Data-source label exposed to the UI:
     //   "live"              — real ESP32 hardware connected
-    //   "server-simulated"  — server is running but using synthetic data (no hardware)
-    //   "reconnecting"      — WebSocket disconnected, retrying
-    //   "simulated"         — client-side fallback simulation (server unreachable)
-    //   "auth-required"     — the server refused us for lack of a valid token
+    //   "server-simulated"     — server was explicitly started in synthetic mode
+    //   "waiting-for-hardware" — server is configured for ESP32 but no frame yet
+    //   "reconnecting"         — WebSocket disconnected, retrying
+    //   "unreachable"          — server cannot be reached; no frames are emitted
+    //   "auth-required"        — the server refused us for lack of a valid token
     this._dataSource = 'reconnecting';
     // The raw source string from the server (e.g. "esp32", "simulated", "simulate")
     this._serverSource = null;
@@ -365,8 +357,8 @@ export class SensingService {
       void this._connect();
     }, delay);
 
-    // Only start simulation after several failed attempts so a brief hiccup
-    // does not immediately switch the UI to "SIMULATED DATA".
+    // Never start a simulation after reconnect attempts. A missing stream is
+    // shown as unavailable instead of being presented as a measurement.
     if (this._reconnectAttempt >= SIM_FALLBACK_AFTER_ATTEMPTS && this._state !== 'simulated') {
       if (clientSimulationAllowed()) {
         this._fallbackToSimulation();
@@ -479,9 +471,8 @@ export class SensingService {
    */
   async _detectServerSource() {
     // ADR-295 (issue #1526): an unreachable or unauthorized status endpoint is
-    // an *unknown* state — it must NOT collapse to "live". Prefer the canonical
-    // `source_state` the server now returns; on any error stay conservative
-    // (server-simulated) until a real frame's `source` field promotes us.
+    // an *unknown* state — it must NOT collapse to "live" or "simulated".
+    // Prefer the canonical `source_state` the server now returns.
     //
     // Send the bearer token via `apiService.getHeaders()` so the probe can
     // actually succeed under the documented secure posture (API auth
@@ -493,10 +484,10 @@ export class SensingService {
         const json = await resp.json();
         this._applyServerSource(json.source, json.source_state);
       } else {
-        this._setDataSource('server-simulated');
+        this._setDataSource('unreachable');
       }
     } catch {
-      this._setDataSource('server-simulated');
+      this._setDataSource('unreachable');
     }
   }
 
@@ -513,8 +504,10 @@ export class SensingService {
         this._setDataSource('live');
       } else if (sourceState === 'synthetic') {
         this._setDataSource('server-simulated');
+      } else if (sourceState === 'disconnected' || sourceState === 'stale') {
+        this._setDataSource('waiting-for-hardware');
       } else {
-        this._setDataSource('server-simulated');
+        this._setDataSource('unreachable');
       }
       return;
     }
@@ -523,8 +516,9 @@ export class SensingService {
     } else if (rawSource === 'simulated' || rawSource === 'simulate') {
       this._setDataSource('server-simulated');
     } else {
-      // Unknown source — show as server-simulated to be safe
-      this._setDataSource('server-simulated');
+      // Unknown source — show as unavailable to be safe. Never label an
+      // unknown state as synthetic data.
+      this._setDataSource('unreachable');
     }
   }
 

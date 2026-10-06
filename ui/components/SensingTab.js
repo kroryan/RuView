@@ -7,6 +7,7 @@
  */
 
 import { sensingService } from '../services/sensing.service.js';
+import { apiService } from '../services/api.service.js';
 import { GaussianSplatRenderer } from './gaussian-splats.js';
 
 export class SensingTab {
@@ -18,6 +19,8 @@ export class SensingTab {
     this._unsubState = null;
     this._resizeObserver = null;
     this._threeLoaded = false;
+    this._calibrationTimer = null;
+    this._calibrationIdentity = null;
   }
 
   async init() {
@@ -25,6 +28,8 @@ export class SensingTab {
     await this._loadThree();
     this._initSplatRenderer();
     this._connectService();
+    this._setupCalibration();
+    this._refreshCalibrationStatus();
     this._setupResize();
   }
 
@@ -120,6 +125,27 @@ export class SensingTab {
           <div class="sensing-card" id="sensingNodeCards">
             <div class="sensing-card-title">NODE STATUS</div>
             <div id="nodeStatusContainer"></div>
+          </div>
+
+          <!-- Real empty-room field calibration -->
+          <div class="sensing-card" id="sensingCalibrationCard">
+            <div class="sensing-card-title">ROOM CALIBRATION</div>
+            <p class="sensing-about-text">
+              Keep the monitored room empty. One capture session can bind
+              several live ESP32 nodes together; every selected node must
+              contribute real CSI before finalization. It never generates demo data.
+            </p>
+            <label for="calibrationNodeIds">Node IDs (comma separated)</label>
+            <input id="calibrationNodeIds" class="sensing-calibration-input" value="1" inputmode="numeric" autocomplete="off">
+            <div class="sensing-calibration-actions">
+              <button id="calibrationUseLive" class="sensing-calibration-button">Use all live nodes</button>
+              <button id="calibrationStart" class="sensing-calibration-button">Start empty-room capture</button>
+              <button id="calibrationStop" class="sensing-calibration-button" disabled>Finalize</button>
+              <button id="calibrationReset" class="sensing-calibration-button sensing-calibration-danger">Reset</button>
+            </div>
+            <div id="calibrationStatus" class="sensing-calibration-status" role="status" aria-live="polite">
+              Waiting for ESP32 frames.
+            </div>
           </div>
 
           <!-- Extra info -->
@@ -228,6 +254,7 @@ export class SensingTab {
       const bannerConfig = {
         'live':              { text: 'LIVE \u2014 ESP32 HARDWARE',           cls: 'sensing-source-live' },
         'server-simulated':  { text: 'SIMULATED \u2014 NO HARDWARE',        cls: 'sensing-source-server-sim' },
+        'waiting-for-hardware': { text: 'ESP32 CONFIGURED \u2014 WAITING FOR HARDWARE DATA', cls: 'sensing-source-waiting' },
         'reconnecting':      { text: 'RECONNECTING...',                    cls: 'sensing-source-reconnecting' },
         'unreachable':       { text: 'NO DATA \u2014 SERVER UNREACHABLE',   cls: 'sensing-source-simulated' },
         'simulated':         { text: 'INVENTED DATA \u2014 NOT MEASURED',   cls: 'sensing-source-simulated' },
@@ -236,6 +263,159 @@ export class SensingTab {
       const cfg = bannerConfig[dataSource] || bannerConfig.reconnecting;
       banner.textContent = cfg.text;
       banner.className = 'sensing-source-banner ' + cfg.cls;
+    }
+  }
+
+  _setupCalibration() {
+    const useLive = this.container.querySelector('#calibrationUseLive');
+    const start = this.container.querySelector('#calibrationStart');
+    const stop = this.container.querySelector('#calibrationStop');
+    const reset = this.container.querySelector('#calibrationReset');
+    if (!start || !stop || !reset) return;
+    useLive?.addEventListener('click', () => void this._useLiveCalibrationNodes());
+    start.addEventListener('click', () => void this._startCalibration());
+    stop.addEventListener('click', () => void this._stopCalibration());
+    reset.addEventListener('click', () => void this._resetCalibration());
+  }
+
+  async _useLiveCalibrationNodes() {
+    try {
+      const latest = await apiService.get('/api/v1/sensing/latest');
+      const ids = [...new Set((latest?.nodes || [])
+        .map((node) => Number(node.node_id))
+        .filter((id) => Number.isInteger(id) && id >= 0 && id <= 255))]
+        .sort((a, b) => a - b);
+      if (!ids.length) throw new Error('No live ESP32 nodes are available yet.');
+      const input = this.container.querySelector('#calibrationNodeIds');
+      if (input) input.value = ids.join(',');
+      this._setCalibrationStatus(`Selected live nodes: ${ids.join(', ')}. Keep the room empty and start capture.`);
+    } catch (error) {
+      this._setCalibrationStatus(error.message, true);
+    }
+  }
+
+  _calibrationNodeIds() {
+    const input = this.container.querySelector('#calibrationNodeIds');
+    const ids = String(input?.value || '')
+      .split(',')
+      .map(value => Number(value.trim()))
+      .filter(Number.isInteger);
+    const unique = [...new Set(ids)].sort((a, b) => a - b);
+    if (!unique.length || unique.some(id => id < 0 || id > 255)) {
+      throw new Error('Enter one or more node IDs from 0 to 255.');
+    }
+    return unique;
+  }
+
+  async _roomBindingDigest(nodeIds) {
+    const material = `ruview-room-nodes-${nodeIds.join('-')}`;
+    const bytes = new TextEncoder().encode(material);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  _setCalibrationStatus(text, error = false) {
+    const element = this.container.querySelector('#calibrationStatus');
+    if (element) {
+      element.textContent = text;
+      element.classList.toggle('sensing-calibration-error', error);
+    }
+  }
+
+  _setCalibrationButtons(active) {
+    const start = this.container.querySelector('#calibrationStart');
+    const stop = this.container.querySelector('#calibrationStop');
+    if (start) start.disabled = active;
+    if (stop) stop.disabled = !active;
+  }
+
+  async _startCalibration() {
+    try {
+      const nodeIds = this._calibrationNodeIds();
+      const digest = await this._roomBindingDigest(nodeIds);
+      const query = nodeIds.length === 1 ? `?source_node_id=${nodeIds[0]}` : '';
+      const result = await apiService.post(`/api/v1/calibration/start${query}`, {
+        binding_digest: digest,
+        source_node_ids: nodeIds,
+      });
+      if (!result?.success) throw new Error(result?.error || 'Calibration could not start.');
+      this._calibrationIdentity = {
+        boot_epoch: result.boot_epoch,
+        session_id: result.session_id,
+        binding_digest: result.binding_digest || digest,
+        source_node_ids: nodeIds,
+      };
+      this._setCalibrationButtons(true);
+      this._setCalibrationStatus('Capture started. Keep the room empty for at least 10 minutes.');
+      this._startCalibrationPolling();
+    } catch (error) {
+      this._setCalibrationStatus(error.message, true);
+    }
+  }
+
+  async _stopCalibration() {
+    try {
+      if (!this._calibrationIdentity) await this._refreshCalibrationStatus();
+      if (!this._calibrationIdentity) throw new Error('No active calibration identity is available.');
+      const result = await apiService.post('/api/v1/calibration/stop', this._calibrationIdentity);
+      if (!result?.success) throw new Error(result?.error || 'Calibration is not complete yet.');
+      this._stopCalibrationPolling();
+      this._calibrationIdentity = null;
+      this._setCalibrationButtons(false);
+      this._setCalibrationStatus(`Calibration complete: ${result.frame_count} frames, baseline ready.`);
+    } catch (error) {
+      this._setCalibrationStatus(error.message, true);
+    }
+  }
+
+  async _resetCalibration() {
+    try {
+      const status = await apiService.get('/api/v1/calibration/status');
+      const result = await apiService.post('/api/v1/calibration/reset', {
+        boot_epoch: status.boot_epoch,
+      });
+      if (!result?.success) throw new Error(result?.error || 'Calibration reset failed.');
+      this._stopCalibrationPolling();
+      this._calibrationIdentity = null;
+      this._setCalibrationButtons(false);
+      this._setCalibrationStatus('Calibration reset. Start a new empty-room capture after live frames arrive.');
+    } catch (error) {
+      this._setCalibrationStatus(error.message, true);
+    }
+  }
+
+  _startCalibrationPolling() {
+    this._stopCalibrationPolling();
+    this._calibrationTimer = setInterval(() => void this._refreshCalibrationStatus(), 5000);
+  }
+
+  _stopCalibrationPolling() {
+    if (this._calibrationTimer) clearInterval(this._calibrationTimer);
+    this._calibrationTimer = null;
+  }
+
+  async _refreshCalibrationStatus() {
+    try {
+      const status = await apiService.get('/api/v1/calibration/status');
+      if (status?.session_id && status?.binding_digest && status?.source_node_ids?.length) {
+        this._calibrationIdentity = {
+          boot_epoch: status.boot_epoch,
+          session_id: status.session_id,
+          binding_digest: status.binding_digest,
+          source_node_ids: status.source_node_ids,
+        };
+      }
+      const active = Boolean(status?.session_id);
+      this._setCalibrationButtons(active);
+      const missing = status?.missing_source_node_ids?.length
+        ? `; missing nodes: ${status.missing_source_node_ids.join(',')}`
+        : '';
+      this._setCalibrationStatus(
+        `${status?.status || 'none'} — ${status?.frame_count || 0} frames, ` +
+        `${Number(status?.elapsed_s || 0).toFixed(0)}s${missing}`
+      );
+    } catch {
+      this._setCalibrationStatus('Calibration status unavailable; verify that RuView is running.', true);
     }
   }
 

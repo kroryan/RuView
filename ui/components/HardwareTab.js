@@ -1,174 +1,108 @@
 // Hardware Tab Component
+//
+// This tab is deliberately hardware-only. It reads the live CSI endpoint and
+// never fabricates antenna values when the ESP32 stream is unavailable.
+
+import { apiService } from '../services/api.service.js';
 
 export class HardwareTab {
   constructor(containerElement) {
     this.container = containerElement;
-    this.antennas = [];
-    this.csiUpdateInterval = null;
-    this.isActive = false;
+    this.refreshTimer = null;
   }
 
-  // Initialize component
   init() {
-    this.setupAntennas();
-    this.startCSISimulation();
+    this._refresh();
+    this.refreshTimer = setInterval(() => this._refresh(), 2000);
   }
 
-  // Set up antenna interactions
-  setupAntennas() {
-    this.antennas = Array.from(this.container.querySelectorAll('.antenna'));
-    
-    this.antennas.forEach(antenna => {
-      antenna.addEventListener('click', () => {
-        antenna.classList.toggle('active');
-        this.updateCSIDisplay();
-      });
-    });
+  async _refresh() {
+    try {
+      const [status, latest] = await Promise.all([
+        apiService.get('/api/v1/status'),
+        apiService.get('/api/v1/sensing/latest'),
+      ]);
+      this._render(status, latest);
+    } catch {
+      this._renderUnavailable('Hardware status unavailable — no measured CSI data.');
+    }
   }
 
-  // Start CSI simulation
-  startCSISimulation() {
-    // Initial update
-    this.updateCSIDisplay();
-    
-    // Set up periodic updates
-    this.csiUpdateInterval = setInterval(() => {
-      if (this.hasActiveAntennas()) {
-        this.updateCSIDisplay();
+  _render(status, latest) {
+    const sourceState = status?.source_state || 'disconnected';
+    const nodes = Array.isArray(latest?.nodes) ? latest.nodes : [];
+    const live = (sourceState === 'live_verified' || sourceState === 'live_unverified') && nodes.length > 0;
+    const banner = this.container.querySelector('#hardwareSourceBanner');
+    const state = this.container.querySelector('#hardwareSourceState');
+    const nodeList = this.container.querySelector('#hardwareNodeList');
+
+    if (banner) {
+      banner.textContent = live ? 'LIVE — MEASURED ESP32 CSI' : 'NO LIVE HARDWARE DATA';
+      banner.className = `hardware-source-banner ${live ? 'hardware-source-live' : 'hardware-source-waiting'}`;
+    }
+    if (state) {
+      state.textContent = live ? `${nodes.length} ESP32 node(s) transmitting` : 'Waiting for measured CSI frames';
+    }
+    if (nodeList) {
+      nodeList.replaceChildren();
+      if (!nodes.length) {
+        const empty = document.createElement('p');
+        empty.textContent = 'No ESP32 node is currently providing CSI data.';
+        nodeList.appendChild(empty);
+      } else {
+        nodes.forEach((node) => nodeList.appendChild(this._nodeRow(node)));
       }
-    }, 1000);
-  }
-
-  // Check if any antennas are active
-  hasActiveAntennas() {
-    return this.antennas.some(antenna => antenna.classList.contains('active'));
-  }
-
-  // Update CSI display
-  updateCSIDisplay() {
-    const activeAntennas = this.antennas.filter(a => a.classList.contains('active'));
-    const isActive = activeAntennas.length > 0;
-    
-    // Get display elements
-    const amplitudeFill = this.container.querySelector('.csi-fill.amplitude');
-    const phaseFill = this.container.querySelector('.csi-fill.phase');
-    const amplitudeValue = this.container.querySelector('.csi-row:first-child .csi-value');
-    const phaseValue = this.container.querySelector('.csi-row:last-child .csi-value');
-    
-    if (!isActive) {
-      // Set to zero when no antennas active
-      if (amplitudeFill) amplitudeFill.style.width = '0%';
-      if (phaseFill) phaseFill.style.width = '0%';
-      if (amplitudeValue) amplitudeValue.textContent = '0.00';
-      if (phaseValue) phaseValue.textContent = '0.0π';
-      return;
     }
-    
-    // Generate realistic CSI values based on active antennas
-    const txCount = activeAntennas.filter(a => a.classList.contains('tx')).length;
-    const rxCount = activeAntennas.filter(a => a.classList.contains('rx')).length;
-    
-    // Amplitude increases with more active antennas
-    const baseAmplitude = 0.3 + (txCount * 0.1) + (rxCount * 0.05);
-    const amplitude = Math.min(0.95, baseAmplitude + (Math.random() * 0.1 - 0.05));
-    
-    // Phase varies more with multiple antennas
-    const phaseVariation = 0.5 + (activeAntennas.length * 0.1);
-    const phase = 0.5 + Math.random() * phaseVariation;
-    
-    // Update display
-    if (amplitudeFill) {
-      amplitudeFill.style.width = `${amplitude * 100}%`;
-      amplitudeFill.style.transition = 'width 0.5s ease';
+
+    const node = nodes[0] || {};
+    const amplitude = Array.isArray(node.amplitude) && node.amplitude.length
+      ? node.amplitude.reduce((sum, value) => sum + Number(value || 0), 0) / node.amplitude.length
+      : null;
+    this._setText('hardwareNodeCount', String(nodes.length));
+    this._setText('hardwareSubcarriers', node.subcarrier_count ? String(node.subcarrier_count) : '—');
+    this._setText('hardwareRate', node.sync?.csi_fps_ema ? `${Number(node.sync.csi_fps_ema).toFixed(1)} Hz` : '—');
+    this._setText('hardwareAmplitude', amplitude === null ? '—' : amplitude.toFixed(2));
+    this._setText('hardwarePhase', 'Unavailable — amplitude-only CSI');
+  }
+
+  _nodeRow(node) {
+    const row = document.createElement('div');
+    row.className = 'hardware-node-row';
+    const id = document.createElement('strong');
+    id.textContent = `Node ${node.node_id ?? '—'}`;
+    const detail = document.createElement('span');
+    const rssi = Number.isFinite(Number(node.rssi_dbm)) ? `${Number(node.rssi_dbm).toFixed(0)} dBm` : 'RSSI —';
+    detail.textContent = `${node.stale ? 'stale' : 'live'} · ${rssi} · ${node.subcarrier_count || '—'} subcarriers`;
+    row.append(id, detail);
+    return row;
+  }
+
+  _renderUnavailable(message) {
+    const banner = this.container.querySelector('#hardwareSourceBanner');
+    const state = this.container.querySelector('#hardwareSourceState');
+    const nodeList = this.container.querySelector('#hardwareNodeList');
+    if (banner) {
+      banner.textContent = 'NO LIVE HARDWARE DATA';
+      banner.className = 'hardware-source-banner hardware-source-waiting';
     }
-    
-    if (phaseFill) {
-      phaseFill.style.width = `${phase * 50}%`;
-      phaseFill.style.transition = 'width 0.5s ease';
+    if (state) state.textContent = message;
+    if (nodeList) {
+      nodeList.replaceChildren();
+      const empty = document.createElement('p');
+      empty.textContent = message;
+      nodeList.appendChild(empty);
     }
-    
-    if (amplitudeValue) {
-      amplitudeValue.textContent = amplitude.toFixed(2);
-    }
-    
-    if (phaseValue) {
-      phaseValue.textContent = `${phase.toFixed(1)}π`;
-    }
-    
-    // Update antenna array visualization
-    this.updateAntennaArray(activeAntennas);
+    ['hardwareNodeCount', 'hardwareSubcarriers', 'hardwareRate', 'hardwareAmplitude', 'hardwarePhase']
+      .forEach((id) => this._setText(id, '—'));
   }
 
-  // Update antenna array visualization
-  updateAntennaArray(activeAntennas) {
-    const arrayStatus = this.container.querySelector('.array-status');
-    if (!arrayStatus) return;
-    
-    const txActive = activeAntennas.filter(a => a.classList.contains('tx')).length;
-    const rxActive = activeAntennas.filter(a => a.classList.contains('rx')).length;
-    
-    // Clear and rebuild using safe DOM methods to prevent XSS
-    arrayStatus.innerHTML = '';
-    
-    const createInfoDiv = (label, value) => {
-      const div = document.createElement('div');
-      div.className = 'array-info';
-      
-      const labelSpan = document.createElement('span');
-      labelSpan.className = 'info-label';
-      labelSpan.textContent = label;
-      
-      const valueSpan = document.createElement('span');
-      valueSpan.className = 'info-value';
-      valueSpan.textContent = value;
-      
-      div.appendChild(labelSpan);
-      div.appendChild(valueSpan);
-      return div;
-    };
-    
-    arrayStatus.appendChild(createInfoDiv('Active TX:', `${txActive}/3`));
-    arrayStatus.appendChild(createInfoDiv('Active RX:', `${rxActive}/6`));
-    arrayStatus.appendChild(createInfoDiv('Signal Quality:', `${this.calculateSignalQuality(txActive, rxActive)}%`));
+  _setText(id, value) {
+    const element = this.container.querySelector(`#${id}`);
+    if (element) element.textContent = value;
   }
 
-  // Calculate signal quality based on active antennas
-  calculateSignalQuality(txCount, rxCount) {
-    if (txCount === 0 || rxCount === 0) return 0;
-    
-    const txRatio = txCount / 3;
-    const rxRatio = rxCount / 6;
-    const quality = (txRatio * 0.4 + rxRatio * 0.6) * 100;
-    
-    return Math.round(quality);
-  }
-
-  // Toggle all antennas
-  toggleAllAntennas(active) {
-    this.antennas.forEach(antenna => {
-      antenna.classList.toggle('active', active);
-    });
-    this.updateCSIDisplay();
-  }
-
-  // Reset antenna configuration
-  resetAntennas() {
-    // Set default configuration (all active)
-    this.antennas.forEach(antenna => {
-      antenna.classList.add('active');
-    });
-    this.updateCSIDisplay();
-  }
-
-  // Clean up
   dispose() {
-    if (this.csiUpdateInterval) {
-      clearInterval(this.csiUpdateInterval);
-      this.csiUpdateInterval = null;
-    }
-    
-    this.antennas.forEach(antenna => {
-      antenna.removeEventListener('click', this.toggleAntenna);
-    });
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = null;
   }
 }
